@@ -24,13 +24,20 @@ Instrumentator().instrument(app).expose(app)
 # Confidence threshold for object detection (0.0 - 1.0).
 # Detections below this score are discarded.
 # Override with: export CONFIDENCE_THRESHOLD=0.7
-_raw_threshold = os.environ.get("CONFIDENCE_THRESHOLD")
-if _raw_threshold is not None:
-    CONFIDENCE_THRESHOLD = float(_raw_threshold)
-    logging.info(f"CONFIDENCE_THRESHOLD set to {CONFIDENCE_THRESHOLD} (from environment)")
-else:
-    CONFIDENCE_THRESHOLD = 0.5
-    logging.info(f"CONFIDENCE_THRESHOLD not set, using default: {CONFIDENCE_THRESHOLD}")
+def get_confidence_threshold():
+    raw_threshold = os.environ.get("CONFIDENCE_THRESHOLD")
+
+    if raw_threshold is not None:
+        threshold = float(raw_threshold)
+        logging.info(f"CONFIDENCE_THRESHOLD set to {threshold} (from environment)")
+        return threshold
+
+    threshold = 0.5
+    logging.info(f"CONFIDENCE_THRESHOLD not set, using default: {threshold}")
+    return threshold
+
+
+CONFIDENCE_THRESHOLD = get_confidence_threshold()
 
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
@@ -185,6 +192,71 @@ def get_prediction_image(uid: str):
     return FileResponse(row[0])
 
 
+@app.get("/predictions/label/")
+def get_predictions_by_empty_label():
+    """
+    Return 400 when the label is empty.
+    """
+    raise HTTPException(status_code=400, detail="Label cannot be empty")
+
+
+@app.get("/predictions/label/{label}")
+def get_predictions_by_label(label: str):
+    """
+    Return all prediction sessions that contain at least one detected object
+    with the given label.
+    """
+    predictions = []
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+
+        session_rows = conn.execute(
+            """
+            SELECT DISTINCT prediction_sessions.uid, prediction_sessions.timestamp
+            FROM prediction_sessions
+            JOIN detection_objects
+            ON detection_objects.prediction_uid = prediction_sessions.uid
+            WHERE detection_objects.label = ?
+            ORDER BY prediction_sessions.timestamp DESC
+            """,
+            (label,),
+        ).fetchall()
+
+        for session_row in session_rows:
+            object_rows = conn.execute(
+                """
+                SELECT id, label, score, box
+                FROM detection_objects
+                WHERE prediction_uid = ? AND label = ?
+                ORDER BY id
+                """,
+                (session_row["uid"], label),
+            ).fetchall()
+
+            detection_objects = []
+
+            for object_row in object_rows:
+                detection_objects.append(
+                    {
+                        "id": object_row["id"],
+                        "label": object_row["label"],
+                        "score": object_row["score"],
+                        "box": object_row["box"],
+                    }
+                )
+
+            predictions.append(
+                {
+                    "uid": session_row["uid"],
+                    "timestamp": session_row["timestamp"],
+                    "detection_objects": detection_objects,
+                }
+            )
+
+    return predictions
+
+
 @app.get("/health")
 def health():
     """
@@ -192,7 +264,7 @@ def health():
     """
     return {"status": "ok"}
 
-if __name__ == "__main__":
+if __name__ == "__main__": # pragma: no cover
     import uvicorn
 
     init_db()
