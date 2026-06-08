@@ -257,6 +257,47 @@ def get_predictions_by_label(label: str):
     return predictions
 
 
+@app.get("/predictions/score/{min_score}")
+def get_detection_objects_by_score(min_score: float):
+    """
+    Return all detection objects whose confidence score is greater than or
+    equal to min_score.
+    """
+    if min_score < 0.0 or min_score > 1.0:
+        raise HTTPException(
+            status_code=400,
+            detail="min_score must be between 0.0 and 1.0",
+        )
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+
+        object_rows = conn.execute(
+            """
+            SELECT id, prediction_uid, label, score, box
+            FROM detection_objects
+            WHERE score >= ?
+            ORDER BY score DESC
+            """,
+            (min_score,),
+        ).fetchall()
+
+    detection_objects = []
+
+    for object_row in object_rows:
+        detection_objects.append(
+            {
+                "id": object_row["id"],
+                "prediction_uid": object_row["prediction_uid"],
+                "label": object_row["label"],
+                "score": object_row["score"],
+                "box": object_row["box"],
+            }
+        )
+
+    return detection_objects
+
+
 @app.get("/health")
 def health():
     """
@@ -265,8 +306,8 @@ def health():
     return {"status": "ok"}
 
 if __name__ == "__main__": # pragma: no cover
-    import uvicorn
+    import uvicorn  # pragma: no cover
 
-    init_db()
+    init_db()  # pragma: no cover
     
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8080)  # pragma: no cover

@@ -114,6 +114,60 @@ def test_get_predictions_by_empty_label_returns_400(client):
     assert response.json() == {"detail": "Label cannot be empty"}
 
 
+def test_get_detection_objects_by_score_returns_matching_objects(client, setup_db):
+    insert_prediction_for_label_test(setup_db)
+
+    response = client.get("/predictions/score/0.5")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": 1,
+            "prediction_uid": "abc-123",
+            "label": "person",
+            "score": 0.91,
+            "box": "[10, 20, 100, 200]",
+        },
+        {
+            "id": 2,
+            "prediction_uid": "abc-123",
+            "label": "car",
+            "score": 0.82,
+            "box": "[30, 40, 120, 220]",
+        }
+    ]
+
+
+def test_get_detection_objects_by_score_returns_empty_list_when_no_matches(
+    client,
+    setup_db,
+):
+    insert_prediction_for_label_test(setup_db)
+
+    response = client.get("/predictions/score/1.0")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_detection_objects_by_score_returns_400_when_score_is_too_low(client):
+    response = client.get("/predictions/score/-0.1")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "min_score must be between 0.0 and 1.0"
+    }
+
+
+def test_get_detection_objects_by_score_returns_400_when_score_is_too_high(client):
+    response = client.get("/predictions/score/1.1")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "min_score must be between 0.0 and 1.0"
+    }
+
+
 def test_predict_rejects_non_image_file(client):
     response = client.post(
         "/predict",
