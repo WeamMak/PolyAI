@@ -105,6 +105,75 @@ def test_get_predictions_by_empty_label_returns_400(client):
     assert response.json() == {"detail": "Label cannot be empty"}
 
 
+def test_predict_rejects_non_image_file(client):
+    response = client.post(
+        "/predict",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Only image files are supported"}
+    
+
+def test_get_prediction_by_uid_returns_prediction(client, setup_db):
+    insert_prediction_for_label_test(setup_db)
+
+    response = client.get("/prediction/abc-123")
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["uid"] == "abc-123"
+    assert data["timestamp"] == "2024-01-01 12:00:00"
+    assert data["original_image"] == "uploads/original/test.jpg"
+    assert data["predicted_image"] == "uploads/predicted/test.jpg"
+    assert len(data["detection_objects"]) == 2
+
+
+def test_get_prediction_by_uid_returns_404_when_missing(client):
+    response = client.get("/prediction/missing-uid")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Prediction not found"}
+
+
+def test_get_prediction_image_returns_file(client, setup_db, tmp_path):
+    image_path = tmp_path / "predicted.jpg"
+    image_path.write_bytes(b"fake image bytes")
+
+    with sqlite3.connect(setup_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO prediction_sessions (
+                uid,
+                timestamp,
+                original_image,
+                predicted_image
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "image-123",
+                "2024-01-01 12:00:00",
+                "uploads/original/test.jpg",
+                str(image_path),
+            ),
+        )
+
+    response = client.get("/prediction/image-123/image")
+
+    assert response.status_code == 200
+    assert response.content == b"fake image bytes"
+
+
+def test_get_prediction_image_returns_404_when_missing(client):
+    response = client.get("/prediction/missing-uid/image")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Image not found"}
+
+
 @pytest.fixture
 def client():
     return TestClient(app)
