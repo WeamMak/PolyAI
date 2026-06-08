@@ -5,8 +5,7 @@ import sqlite3
 
 os.environ.setdefault("CONFIDENCE_THRESHOLD", "0.5")
 
-from app import app, init_db
-
+from app import app, init_db, get_confidence_threshold
 TEST_IMAGE = os.path.join(os.path.dirname(__file__), "data", "beatles.jpeg")
 
 
@@ -64,6 +63,16 @@ def insert_prediction_for_label_test(db_file):
             """,
             ("abc-123", "car", 0.82, "[30, 40, 120, 220]"),
         )
+
+
+def test_get_confidence_threshold_uses_default(monkeypatch):
+    monkeypatch.delenv("CONFIDENCE_THRESHOLD", raising=False)
+    assert get_confidence_threshold() == 0.5
+
+
+def test_get_confidence_threshold_uses_environment_value(monkeypatch):
+    monkeypatch.setenv("CONFIDENCE_THRESHOLD", "0.7")
+    assert get_confidence_threshold() == 0.7
 
 
 def test_get_predictions_by_label_returns_matching_sessions(client, setup_db):

@@ -24,13 +24,20 @@ Instrumentator().instrument(app).expose(app)
 # Confidence threshold for object detection (0.0 - 1.0).
 # Detections below this score are discarded.
 # Override with: export CONFIDENCE_THRESHOLD=0.7
-_raw_threshold = os.environ.get("CONFIDENCE_THRESHOLD")
-if _raw_threshold is not None:
-    CONFIDENCE_THRESHOLD = float(_raw_threshold)
-    logging.info(f"CONFIDENCE_THRESHOLD set to {CONFIDENCE_THRESHOLD} (from environment)")
-else:
-    CONFIDENCE_THRESHOLD = 0.5
-    logging.info(f"CONFIDENCE_THRESHOLD not set, using default: {CONFIDENCE_THRESHOLD}")
+def get_confidence_threshold():
+    raw_threshold = os.environ.get("CONFIDENCE_THRESHOLD")
+
+    if raw_threshold is not None:
+        threshold = float(raw_threshold)
+        logging.info(f"CONFIDENCE_THRESHOLD set to {threshold} (from environment)")
+        return threshold
+
+    threshold = 0.5
+    logging.info(f"CONFIDENCE_THRESHOLD not set, using default: {threshold}")
+    return threshold
+
+
+CONFIDENCE_THRESHOLD = get_confidence_threshold()
 
 UPLOAD_DIR = "uploads/original"
 PREDICTED_DIR = "uploads/predicted"
