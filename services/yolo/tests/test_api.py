@@ -1,6 +1,7 @@
 import os
 import pytest
 from fastapi.testclient import TestClient
+import sqlite3
 
 os.environ.setdefault("CONFIDENCE_THRESHOLD", "0.5")
 
@@ -14,6 +15,94 @@ def setup_db(tmp_path, monkeypatch):
     db_file = str(tmp_path / "test_predictions.db")
     monkeypatch.setattr("app.DB_PATH", db_file)
     init_db()
+    return db_file
+
+
+def insert_prediction_for_label_test(db_file):
+
+    with sqlite3.connect(db_file) as conn:
+        conn.execute(
+            """
+            INSERT INTO prediction_sessions (
+                uid,
+                timestamp,
+                original_image,
+                predicted_image
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "abc-123",
+                "2024-01-01 12:00:00",
+                "uploads/original/test.jpg",
+                "uploads/predicted/test.jpg",
+            ),
+        )
+
+        conn.execute(
+            """
+            INSERT INTO detection_objects (
+                prediction_uid,
+                label,
+                score,
+                box
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            ("abc-123", "person", 0.91, "[10, 20, 100, 200]"),
+        )
+
+        conn.execute(
+            """
+            INSERT INTO detection_objects (
+                prediction_uid,
+                label,
+                score,
+                box
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            ("abc-123", "car", 0.82, "[30, 40, 120, 220]"),
+        )
+
+
+def test_get_predictions_by_label_returns_matching_sessions(client, setup_db):
+    insert_prediction_for_label_test(setup_db)
+    response = client.get("/predictions/label/person")
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data == [
+        {
+            "uid": "abc-123",
+            "timestamp": "2024-01-01 12:00:00",
+            "detection_objects": [
+                {
+                    "id": 1,
+                    "label": "person",
+                    "score": 0.91,
+                    "box": "[10, 20, 100, 200]",
+                }
+            ],
+        }
+    ]
+
+
+def test_get_predictions_by_label_returns_empty_list_when_no_matches(client, setup_db):
+    insert_prediction_for_label_test(setup_db)
+    response = client.get("/predictions/label/dog")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_predictions_by_empty_label_returns_400(client):
+    response = client.get("/predictions/label/")
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Label cannot be empty"}
 
 
 @pytest.fixture
@@ -25,5 +114,3 @@ def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
-
-
