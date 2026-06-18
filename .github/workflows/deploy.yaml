@@ -1,0 +1,48 @@
+name: Deploy Yolo
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  deploy-dev:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Dev instance
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEV_INSTANCE_IP }}
+          username: ubuntu
+          key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/PolyAI
+            git fetch origin
+            git reset --hard origin/dev
+            cd services/yolo
+            source .venv/bin/activate
+            pip install -r requirements.txt
+            sudo systemctl restart yolo
+            sudo systemctl status yolo --no-pager
+
+  deploy-prod:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Prod instance
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_INSTANCE_IP }}
+          username: ubuntu
+          key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/PolyAI
+            git fetch origin
+            git reset --hard origin/main
+            cd services/yolo
+            source .venv/bin/activate
+            pip install -r requirements.txt
+            sudo systemctl restart yolo
+            sudo systemctl status yolo --no-pager
