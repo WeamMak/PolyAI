@@ -21,11 +21,19 @@ jobs:
             cd /home/ubuntu/PolyAI
             git fetch origin
             git reset --hard origin/dev
-            cd services/yolo
-            source .venv/bin/activate
-            pip install -r requirements.txt
-            sudo systemctl restart yolo
-            sudo systemctl status yolo --no-pager
+
+            if [ ! -d "/home/ubuntu/PolyAI/.venv" ]; then
+              python3 -m venv /home/ubuntu/PolyAI/.venv
+            fi
+
+            /home/ubuntu/PolyAI/.venv/bin/pip install --upgrade pip
+            /home/ubuntu/PolyAI/.venv/bin/pip install -r /home/ubuntu/PolyAI/services/yolo/requirements.txt
+            /home/ubuntu/PolyAI/.venv/bin/pip install -r /home/ubuntu/PolyAI/services/yolo/torch-requirements.txt
+
+
+            sudo systemctl daemon-reload
+            sudo systemctl restart yolo.service
+            sudo systemctl status yolo.service --no-pager
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
@@ -41,8 +49,15 @@ jobs:
             cd /home/ubuntu/PolyAI
             git fetch origin
             git reset --hard origin/main
-            cd services/yolo
-            source .venv/bin/activate
-            pip install -r requirements.txt
-            sudo systemctl restart yolo
-            sudo systemctl status yolo --no-pager
+
+            if [ ! -d "/home/ubuntu/PolyAI/.venv" ]; then
+              python3 -m venv /home/ubuntu/PolyAI/.venv
+            fi
+
+            /home/ubuntu/PolyAI/.venv/bin/pip install --upgrade pip
+            /home/ubuntu/PolyAI/.venv/bin/pip install -r /home/ubuntu/PolyAI/services/yolo/requirements.txt
+            /home/ubuntu/PolyAI/.venv/bin/pip install -r /home/ubuntu/PolyAI/services/yolo/torch-requirements.txt
+
+            sudo systemctl daemon-reload
+            sudo systemctl restart yolo.service
+            sudo systemctl status yolo.service --no-pager
