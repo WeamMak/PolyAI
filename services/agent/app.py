@@ -101,7 +101,11 @@ app = FastAPI(title="Vision Agent")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://dev.weam.fursa.click:3000",
+        "http://prod.weam.fursa.click:3000",
+    ],
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
