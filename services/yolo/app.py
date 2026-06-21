@@ -327,6 +327,14 @@ def health():
     """
     return {"status": "ok"}
 
+
+@app.get("/health2")
+def health2():
+    """
+    Health check endpoint
+    """
+    return {"status": "ok2"}
+
 if __name__ == "__main__": # pragma: no cover
     import uvicorn  # pragma: no cover
 
