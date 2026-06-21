@@ -31,6 +31,7 @@ MODEL = os.environ.get("MODEL")
 ALLOWED_MODELS = {
     "openai:gpt-5.4-mini",
     "anthropic:claude-haiku-4-5",
+    "google-genai:gemini-2.5-flash",
 }
 
 if MODEL not in ALLOWED_MODELS:
