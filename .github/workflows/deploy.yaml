@@ -1,4 +1,4 @@
-name: Deploy Yolo
+name: Deploy PolyAI
 
 on:
   push:
@@ -26,14 +26,25 @@ jobs:
               python3 -m venv /home/ubuntu/PolyAI/.venv
             fi
 
-            /home/ubuntu/PolyAI/.venv/bin/pip install --upgrade pip
-            /home/ubuntu/PolyAI/.venv/bin/pip install -r /home/ubuntu/PolyAI/services/yolo/requirements.txt
-            /home/ubuntu/PolyAI/.venv/bin/pip install -r /home/ubuntu/PolyAI/services/yolo/torch-requirements.txt
+              /home/ubuntu/PolyAI/.venv/bin/python -m pip install --upgrade pip
+              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/yolo/torch-requirements.txt
+              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/yolo/requirements.txt
+              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/agent/requirements.txt
 
+
+            cd /home/ubuntu/PolyAI/services/frontend
+            npm ci
+            npm run build
 
             sudo systemctl daemon-reload
             sudo systemctl restart yolo.service
+            sudo systemctl restart agent.service
+            sudo systemctl restart frontend.service
+
             sudo systemctl status yolo.service --no-pager
+            sudo systemctl status agent.service --no-pager
+            sudo systemctl status frontend.service --no-pager
+
 
   deploy-prod:
     if: github.ref == 'refs/heads/main'
@@ -54,10 +65,21 @@ jobs:
               python3 -m venv /home/ubuntu/PolyAI/.venv
             fi
 
-            /home/ubuntu/PolyAI/.venv/bin/pip install --upgrade pip
-            /home/ubuntu/PolyAI/.venv/bin/pip install -r /home/ubuntu/PolyAI/services/yolo/requirements.txt
-            /home/ubuntu/PolyAI/.venv/bin/pip install -r /home/ubuntu/PolyAI/services/yolo/torch-requirements.txt
+              /home/ubuntu/PolyAI/.venv/bin/python -m pip install --upgrade pip
+              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/yolo/torch-requirements.txt
+              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/yolo/requirements.txt
+              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/agent/requirements.txt
+
+
+            cd /home/ubuntu/PolyAI/services/frontend
+            npm ci
+            npm run build
 
             sudo systemctl daemon-reload
             sudo systemctl restart yolo.service
+            sudo systemctl restart agent.service
+            sudo systemctl restart frontend.service
+
             sudo systemctl status yolo.service --no-pager
+            sudo systemctl status agent.service --no-pager
+            sudo systemctl status frontend.service --no-pager
