@@ -73,7 +73,7 @@ TOOLS = {
 llm = init_chat_model(MODEL, temperature=0)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
-def run_agent(history: list, max_iterations: int = 10) -> str:
+def run_agent(history: list, max_iterations: int = 1) -> str:
     """
     Simple ReAct loop:
       1. Send messages to the LLM.
