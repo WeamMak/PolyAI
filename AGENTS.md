@@ -26,6 +26,20 @@ Search for things like:
 
 If you find that a concept has not been taught yet, either avoid it or flag it clearly to the student.
 
+---
+
+## Skill Eval Reports
+
+When using a skill from `.agents/skills/`, check whether that skill has an `evals/evals.json` file.
+
+If it does:
+- Select the eval cases relevant to the user's task.
+- Use their assertions as a checklist while doing the work.
+- Before finishing, write a dated report in that skill's `reports/` folder.
+- The report must include the report date/time, the user prompt, which evals were used, which evals passed, which failed or were not run, and short evidence for each status.
+
+If no evals exist for the skill, say that no skill evals were available.
+
 
 ## Architecture Constraints
 

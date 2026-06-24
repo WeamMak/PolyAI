@@ -30,6 +30,36 @@ If unsure whether a concept has been taught in the course, search `github.com/al
 - Do not introduce Alembic or a migration framework unless the user explicitly asks for migrations.
 - Run the YOLO tests before completion: from `services/yolo`, run `pytest tests/`.
 
+## Eval And Report Workflow
+
+Before making changes, read `.agents/skills/data-layer/evals/evals.json` and select the eval cases relevant to the user's prompt.
+
+Use the selected eval assertions as a checklist while working. For example, a SQLAlchemy refactor should use `sqlalchemy_refactor_preserves_existing_api`; adding `/predictions/recent` should use `recent_predictions_endpoint`; Postgres configuration should use `postgres_configurable_backend`.
+
+Before the final response, write a report under:
+
+```text
+.agents/skills/data-layer/reports/
+```
+
+Name the report with the current date and time, for example:
+
+```text
+2026-06-24_14-30-00_sqlalchemy-refactor.md
+```
+
+The report must include:
+
+- report date and time
+- user prompt
+- eval cases used
+- status for each eval: `passed`, `failed`, `partial`, or `not run`
+- short evidence for each status
+- commands run, especially `pytest tests/`
+- remaining risks or skipped checks
+
+Do not mark an eval as passed only because the code looks plausible. Mark it passed only when the relevant assertions were checked against files, command output, or API behavior.
+
 ## Target File Shape
 
 For a SQLAlchemy refactor, create these files:
