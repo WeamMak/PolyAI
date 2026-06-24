@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 YOLO_SERVICE_URL = os.environ.get("YOLO_SERVICE_URL", "http://localhost:8080")
 MODEL = os.environ.get("MODEL")
@@ -65,6 +65,26 @@ def detect_objects() -> str:
     return json.dumps(response.json())
 
 
+def fetch_annotated_image_b64(prediction_uid: str) -> Optional[str]:
+    """
+    Fetch the annotated image from YOLO and encode it for the API response.
+
+    This value is not added to the LangChain messages, so the LLM still only
+    receives the text JSON returned by the detection tool.
+    """
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(
+                f"{YOLO_SERVICE_URL}/prediction/{prediction_uid}/image"
+            )
+            response.raise_for_status()
+    except httpx.HTTPError:
+        logging.exception("Could not fetch annotated image for %s", prediction_uid)
+        return None
+
+    return base64.b64encode(response.content).decode("utf-8")
+
+
 # Registry: map tool name -> tool function
 TOOLS = {
     detect_objects.name: detect_objects
@@ -73,7 +93,17 @@ TOOLS = {
 llm = init_chat_model(MODEL, temperature=0)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
-def run_agent(history: list, max_iterations: int = 10) -> str:
+
+class AgentRunResult(BaseModel):
+    response: str
+    prediction_id: Optional[str] = None
+    annotated_image: Optional[str] = None
+    iterations: int = 0
+    tools_called: list[str] = Field(default_factory=list)
+    context_limit_exceeded: bool = False
+
+
+def run_agent(history: list, max_iterations: int = 10) -> AgentRunResult:
     """
     Simple ReAct loop:
       1. Send messages to the LLM.
@@ -81,22 +111,47 @@ def run_agent(history: list, max_iterations: int = 10) -> str:
       3. Repeat until the LLM returns a plain text response.
     """
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
+    tools_called = []
+    prediction_id = None
+    annotated_image = None
 
-    for _ in range(max_iterations):
+    for iteration in range(1, max_iterations + 1):
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
 
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
-            return response.content
+            return AgentRunResult(
+                response=response.content,
+                prediction_id=prediction_id,
+                annotated_image=annotated_image,
+                iterations=iteration,
+                tools_called=tools_called,
+            )
 
         # Execute every tool the model requested
         for tool_call in response.tool_calls:
+            tools_called.append(tool_call["name"])
             tool_fn = TOOLS[tool_call["name"]]
             tool_result = tool_fn.invoke(tool_call)          # returns a ToolMessage
             messages.append(tool_result)
-            
-    return "I reached the maximum number of tool calls and could not finish safely."
+
+            try:
+                tool_data = json.loads(tool_result.content)
+                if tool_data.get("prediction_uid"):
+                    prediction_id = tool_data["prediction_uid"]
+                    annotated_image = fetch_annotated_image_b64(prediction_id)
+            except json.JSONDecodeError:
+                pass
+
+    return AgentRunResult(
+        response="I reached the maximum number of tool calls and could not finish safely.",
+        prediction_id=prediction_id,
+        annotated_image=annotated_image,
+        iterations=max_iterations,
+        tools_called=tools_called,
+        context_limit_exceeded=True,
+    )
 
 
 
@@ -126,6 +181,12 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    prediction_id: Optional[str] = None
+    annotated_image: Optional[str] = None
+    agent_loop_time_s: float = 0.0
+    iterations: int = 0
+    tools_called: list[str] = Field(default_factory=list)
+    context_limit_exceeded: bool = False
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -146,7 +207,15 @@ def chat(request: ChatRequest):
 
     token = _current_image_b64.set(latest_image)
     try:
-        return ChatResponse(response=run_agent(lc_messages))
+        agent_result = run_agent(lc_messages)
+        return ChatResponse(
+            response=agent_result.response,
+            prediction_id=agent_result.prediction_id,
+            annotated_image=agent_result.annotated_image,
+            iterations=agent_result.iterations,
+            tools_called=agent_result.tools_called,
+            context_limit_exceeded=agent_result.context_limit_exceeded,
+        )
     finally:
         _current_image_b64.reset(token)
 
