@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import time
 from contextvars import ContextVar
 from typing import Optional
 
@@ -207,11 +208,14 @@ def chat(request: ChatRequest):
 
     token = _current_image_b64.set(latest_image)
     try:
+        start_time = time.time()
         agent_result = run_agent(lc_messages)
+        agent_loop_time_s = round(time.time() - start_time, 2)
         return ChatResponse(
             response=agent_result.response,
             prediction_id=agent_result.prediction_id,
             annotated_image=agent_result.annotated_image,
+            agent_loop_time_s=agent_loop_time_s,
             iterations=agent_result.iterations,
             tools_called=agent_result.tools_called,
             context_limit_exceeded=agent_result.context_limit_exceeded,
