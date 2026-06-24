@@ -1,6 +1,6 @@
 # YOLO Object Detection Service
 
-This is a FastAPI-based web service that performs object detection on uploaded images using the YOLOv8 model. The application analyzes images, detects objects, and stores prediction results in a SQLite database for later retrieval.
+This is a FastAPI-based web service that performs object detection on uploaded images using the YOLOv8 model. The application analyzes images, detects objects, and stores prediction results with SQLAlchemy for later retrieval. SQLite is used by default.
 
 ## Setup Instructions
 
@@ -28,6 +28,13 @@ You can test the api endpoints using `curl` or Postman. See the API Endpoints se
 | Variable | Default | Description |
 |---|---|---|
 | `CONFIDENCE_THRESHOLD` | `0.5` | Minimum confidence score (0.0–1.0) for a detection to be reported. Raise it to get only high-confidence results; lower it to catch more objects. |
+| `DB_BACKEND` | `sqlite` | Database backend. Use `sqlite` for local development or `postgres` for PostgreSQL. |
+| `DATABASE_URL` | `sqlite:///./predictions.db` | SQLite database URL used when `DB_BACKEND` is not `postgres`. |
+| `DB_USER` | `user` | PostgreSQL username when `DB_BACKEND=postgres`. |
+| `DB_PASSWORD` | `pass` | PostgreSQL password when `DB_BACKEND=postgres`. |
+| `DB_HOST` | `localhost` | PostgreSQL host when `DB_BACKEND=postgres`. |
+| `DB_PORT` | `5432` | PostgreSQL port when `DB_BACKEND=postgres`. |
+| `DB_NAME` | `db` | PostgreSQL database name when `DB_BACKEND=postgres`. |
 
 Example:
 ```bash
@@ -35,9 +42,21 @@ export CONFIDENCE_THRESHOLD=0.7
 python app.py
 ```
 
+PostgreSQL example:
+
+```bash
+export DB_BACKEND=postgres
+export DB_USER=polyai
+export DB_PASSWORD=secret
+export DB_HOST=localhost
+export DB_PORT=5432
+export DB_NAME=polyai_predictions
+python app.py
+```
+
 ## Running Tests
 
-The test suite uses `pytest` and FastAPI's built-in test client — no running server needed.
+The test suite uses `pytest` with a temporary SQLite database — no running server needed.
 
 ```bash
 pytest tests/
@@ -64,4 +83,4 @@ curl -X POST -F "file=@your_image.jpg" http://localhost:8080/predict
 
 2. View detection results (replace {uid} with the ID returned from the upload):
 ```bash
-curl http://localhost:8080/prediction/{uid} 
+curl http://localhost:8080/prediction/{uid}

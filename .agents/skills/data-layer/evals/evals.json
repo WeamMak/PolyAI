@@ -1,0 +1,125 @@
+{
+  "skill": "yolo-api-data-layer",
+  "evals": [
+    {
+      "name": "sqlalchemy_refactor_preserves_existing_api",
+      "prompt": "refactor the api to use sqlalchemy",
+      "expected_output": "The agent refactors the YOLO service database layer from raw sqlite3 calls to SQLAlchemy ORM while preserving all existing endpoint paths, status codes, and response shapes.",
+      "assertions": [
+        "Creates services/yolo/models.py with PredictionSession and DetectionObject SQLAlchemy models using the existing table names prediction_sessions and detection_objects.",
+        "Creates services/yolo/db.py with create_engine, SessionLocal, get_db, and SQLite as the default database backend.",
+        "Updates services/yolo/app.py to use FastAPI Depends(get_db) and SQLAlchemy Session for database access.",
+        "Removes raw application database usage from services/yolo/app.py, including import sqlite3, DB_PATH, init_db(), CREATE TABLE, INSERT INTO, and SELECT SQL strings.",
+        "Preserves /predict response keys exactly: prediction_uid, detection_count, labels, and time_took.",
+        "Preserves existing 400 and 404 error details for invalid files, missing predictions, missing images, empty labels, and invalid score ranges.",
+        "Updates services/yolo/tests to use SQLAlchemy models or sessions instead of sqlite3, DB_PATH monkeypatching, or init_db().",
+        "Adds sqlalchemy to services/yolo/requirements.txt.",
+        "Runs pytest tests/ from services/yolo and reports the result."
+      ]
+    },
+    {
+      "name": "recent_predictions_endpoint",
+      "prompt": "add an endpoint GET /predictions/recent that returns the 10 most recent sessions",
+      "expected_output": "The agent adds a recent-predictions endpoint backed by the SQLAlchemy data layer and tests that it returns the newest prediction sessions first with a maximum of 10 results.",
+      "assertions": [
+        "Ensures services/yolo/models.py and services/yolo/db.py exist and are used for persistence.",
+        "Adds GET /predictions/recent in services/yolo/app.py without breaking existing /prediction/{uid}, /predictions/label/{label}, or /predictions/score/{min_score} routes.",
+        "Queries PredictionSession with SQLAlchemy, orders by PredictionSession.timestamp descending, and limits results to 10.",
+        "Formats timestamp values as YYYY-MM-DD HH:MM:SS to avoid changing the API timestamp shape.",
+        "Adds tests that insert more than 10 PredictionSession rows through SQLAlchemy and assert only the 10 newest are returned.",
+        "Does not use raw sqlite3, raw SELECT strings, or DB_PATH for the new endpoint.",
+        "Runs pytest tests/ from services/yolo and reports the result."
+      ]
+    },
+    {
+      "name": "user_feedback_table",
+      "prompt": "add a UserFeedback table to track user ratings per prediction",
+      "expected_output": "The agent extends the SQLAlchemy model layer with a UserFeedback table related to prediction sessions, plus API and tests if endpoints are needed by the requested behavior.",
+      "assertions": [
+        "Adds a UserFeedback SQLAlchemy model in services/yolo/models.py with a table name such as user_feedback.",
+        "Defines a foreign key from UserFeedback to prediction_sessions.uid.",
+        "Uses explicit columns for at least id, prediction_uid, rating, and a timestamp or created_at field; includes comment text only if useful for the feature.",
+        "Uses SQLAlchemy relationships only where they keep the code readable for students.",
+        "Creates tables through Base.metadata.create_all rather than manual CREATE TABLE SQL.",
+        "Adds or updates tests that create feedback for an existing prediction through SQLAlchemy-backed app behavior.",
+        "Does not reintroduce sqlite3, DB_PATH, init_db(), or raw INSERT/SELECT SQL.",
+        "Runs pytest tests/ from services/yolo and reports the result."
+      ]
+    },
+    {
+      "name": "predict_endpoint_tests",
+      "prompt": "write tests for the /predict endpoint",
+      "expected_output": "The agent writes or updates /predict tests that work with the SQLAlchemy data layer and verify both the HTTP response and persisted database rows.",
+      "assertions": [
+        "Uses FastAPI TestClient to call POST /predict with a real test image from services/yolo/tests/data.",
+        "Asserts the response includes prediction_uid, detection_count, labels, and time_took with compatible value types.",
+        "Verifies a PredictionSession row is persisted using a SQLAlchemy Session, not sqlite3.",
+        "Verifies DetectionObject rows are persisted for the prediction uid using SQLAlchemy model queries.",
+        "Keeps the existing non-image upload test and its exact 400 detail: Only image files are supported.",
+        "Uses dependency_overrides for get_db or an equivalent explicit SQLAlchemy test database setup.",
+        "Does not call init_db() or monkeypatch app.DB_PATH.",
+        "Runs pytest tests/ from services/yolo and reports the result."
+      ]
+    },
+    {
+      "name": "architectural_database_fix",
+      "prompt": "the database layer doesn't follow our architectural design, fix it",
+      "expected_output": "The agent identifies the raw SQLite data-access code as the architecture issue and refactors it into explicit SQLAlchemy model and database modules while keeping the service behavior unchanged.",
+      "assertions": [
+        "Creates or uses services/yolo/models.py for declarative SQLAlchemy models.",
+        "Creates or uses services/yolo/db.py for database URL configuration, engine, SessionLocal, and get_db.",
+        "Keeps route handlers explicit and readable, with database sessions passed through Depends(get_db).",
+        "Removes raw sqlite3 from application code and avoids hiding behavior behind a high-level framework or opaque abstraction.",
+        "Keeps the image-processing flow in /predict intact: validate extension, save original image, run YOLO, save annotated image, persist rows, return the same response shape.",
+        "Updates tests to follow the new architecture instead of reaching into raw SQLite internals.",
+        "Runs pytest tests/ from services/yolo and reports the result."
+      ]
+    },
+    {
+      "name": "delete_prediction_cascade",
+      "prompt": "delete a prediction session and all its detection objects by uid",
+      "expected_output": "The agent adds delete-by-uid behavior using SQLAlchemy ORM deletion and cascade behavior so both the prediction session and its detection objects are removed.",
+      "assertions": [
+        "Defines a relationship between PredictionSession and DetectionObject with cascade behavior such as cascade=\"all, delete-orphan\".",
+        "Adds a DELETE endpoint for a prediction uid only if one does not already exist and chooses a clear path consistent with existing prediction routes.",
+        "Returns 404 with a clear detail when the prediction uid does not exist.",
+        "Deletes the PredictionSession through the SQLAlchemy Session and commits the transaction.",
+        "Tests that deleting an existing prediction removes both the PredictionSession row and all related DetectionObject rows.",
+        "Tests the missing-uid 404 path.",
+        "Does not use raw DELETE SQL, sqlite3, DB_PATH, or manual cleanup queries.",
+        "Runs pytest tests/ from services/yolo and reports the result."
+      ]
+    },
+    {
+      "name": "processing_time_column",
+      "prompt": "add a column processing_time_ms to the prediction_sessions table",
+      "expected_output": "The agent adds a processing_time_ms SQLAlchemy model column, persists it during /predict, and keeps the existing /predict response shape unless explicitly asked to change it.",
+      "assertions": [
+        "Adds processing_time_ms to PredictionSession in services/yolo/models.py using an appropriate numeric column type such as Integer or Float.",
+        "Computes processing time in /predict and persists processing_time_ms on the PredictionSession row.",
+        "Keeps the existing /predict response key time_took unchanged.",
+        "Does not remove or rename existing PredictionSession columns uid, timestamp, original_image, or predicted_image.",
+        "Adds tests that assert processing_time_ms is saved in the database after POST /predict.",
+        "Updates any response tests only if the API already returns session details that should now include the new column.",
+        "Does not use ALTER TABLE SQL, sqlite3, DB_PATH, or init_db().",
+        "Runs pytest tests/ from services/yolo and reports the result."
+      ]
+    },
+    {
+      "name": "postgres_configurable_backend",
+      "prompt": "make the database backend configurable so we can use postgres in production",
+      "expected_output": "The agent adds environment-driven SQLAlchemy database configuration that defaults to SQLite and switches to Postgres when DB_BACKEND=postgres.",
+      "assertions": [
+        "Creates or updates services/yolo/db.py to read DB_BACKEND with a default value of sqlite.",
+        "Uses sqlite:///./predictions.db or DATABASE_URL for local SQLite by default.",
+        "Builds a Postgres SQLAlchemy URL from environment variables such as DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, and DB_NAME when DB_BACKEND=postgres.",
+        "Uses connect_args={\"check_same_thread\": False} only for SQLite.",
+        "Adds a Postgres driver such as psycopg2-binary to services/yolo/requirements.txt.",
+        "Documents the new database environment variables in services/yolo/README.md.",
+        "Keeps tests running against temporary SQLite with SQLAlchemy dependency overrides.",
+        "Does not hardcode production credentials.",
+        "Runs pytest tests/ from services/yolo and reports the result."
+      ]
+    }
+  ]
+}
