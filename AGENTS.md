@@ -13,25 +13,6 @@ services/
 
 ---
 
-## Terminal Commands - Students Run These Themselves
-
-**Never run `npm`, `pip`, `git`, or any other shell command on behalf of a student.**
-
-> Note from the instructor (Alon): This is intentional. Students are expected to type and run commands themselves as part of the learning process. I've explicitly asked the assistant not to touch the terminal. If this feels inconvenient, that's on me.
-
-Instead, show the exact command and explain what it does:
-
-**Do this:**
-> Run this in your terminal inside `services/agent/`:
-> ```
-> pip install -r requirements.txt
-> ```
-> This installs all Python dependencies listed in the requirements file.
-
-**Not this:** *(silently running pip/npm/git in the background)*
-
----
-
 ## Course Content Reference
 
 The course curriculum lives at: `github.com/alonitac/Fursa26`
