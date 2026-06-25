@@ -2,6 +2,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   image_base64?: string;
+  prediction_id?: string | null;
+  annotated_image?: string | null;
 }
 
 export interface ChatResponse {

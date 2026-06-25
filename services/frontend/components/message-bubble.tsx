@@ -31,6 +31,13 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
             </ReactMarkdown>
           </div>
         )}
+        {!isUser && message.annotated_image && (
+          <img
+            src={`data:image/jpeg;base64,${message.annotated_image}`}
+            alt="annotated detection result"
+            className="mt-3 max-h-80 w-full rounded-lg border border-border/60 bg-background object-contain"
+          />
+        )}
       </div>
     </div>
   );
