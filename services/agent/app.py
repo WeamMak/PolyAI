@@ -47,6 +47,9 @@ SYSTEM_PROMPT = (
     "Use the available tools to extract information from images. "
 )
 
+REQUIRED_MODEL_FEATURES = ["structured_output", "tool_calling"]
+CONTEXT_LIMIT_WARNING_RATIO = 0.9
+
 _current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
 
 @tool
@@ -91,7 +94,84 @@ TOOLS = {
     detect_objects.name: detect_objects
 }
 
+
+def validate_model_profile(model_name: Optional[str], profile: dict):
+    """
+    Stop the app early if the selected model cannot support this agent.
+    """
+    missing_features = []
+
+    for feature in REQUIRED_MODEL_FEATURES:
+        if profile.get(feature) is not True:
+            missing_features.append(feature)
+
+    max_input_tokens = profile.get("max_input_tokens")
+    has_token_limit = isinstance(max_input_tokens, int) and max_input_tokens > 0
+
+    if not missing_features and has_token_limit:
+        return
+
+    error_lines = [
+        f"\n[ERROR] MODEL='{model_name}' does not have the required profile support."
+    ]
+
+    if missing_features:
+        error_lines.append(
+            "Missing or unsupported features: " + ", ".join(missing_features)
+        )
+
+    if not has_token_limit:
+        error_lines.append("Missing or invalid profile value: max_input_tokens")
+
+    error_lines.append("Model profile:")
+    error_lines.append(json.dumps(profile, indent=2, sort_keys=True))
+
+    raise SystemExit("\n".join(error_lines))
+
+
+class TokenUsage(BaseModel):
+    input: int = 0
+    output: int = 0
+    total: int = 0
+
+
+def read_token_usage(response: AIMessage) -> TokenUsage:
+    """
+    Convert LangChain usage metadata into the API response shape.
+    """
+    usage = response.usage_metadata or {}
+
+    input_tokens = usage.get("input_tokens") or 0
+    output_tokens = usage.get("output_tokens") or 0
+    total_tokens = usage.get("total_tokens")
+
+    if total_tokens is None:
+        total_tokens = input_tokens + output_tokens
+
+    return TokenUsage(
+        input=input_tokens,
+        output=output_tokens,
+        total=total_tokens,
+    )
+
+
+def add_token_usage(current: TokenUsage, latest: TokenUsage) -> TokenUsage:
+    return TokenUsage(
+        input=current.input + latest.input,
+        output=current.output + latest.output,
+        total=current.total + latest.total,
+    )
+
+
+def is_near_context_limit(input_tokens: int, profile: dict) -> bool:
+    max_input_tokens = profile["max_input_tokens"]
+    warning_threshold = max_input_tokens * CONTEXT_LIMIT_WARNING_RATIO
+    return input_tokens >= warning_threshold
+
+
 llm = init_chat_model(MODEL, temperature=0)
+MODEL_PROFILE = getattr(llm, "profile", None) or {}
+validate_model_profile(MODEL, MODEL_PROFILE)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
@@ -99,6 +179,7 @@ class AgentRunResult(BaseModel):
     response: str
     prediction_id: Optional[str] = None
     annotated_image: Optional[str] = None
+    tokens_used: TokenUsage = Field(default_factory=TokenUsage)
     iterations: int = 0
     tools_called: list[str] = Field(default_factory=list)
     context_limit_exceeded: bool = False
@@ -115,10 +196,21 @@ def run_agent(history: list, max_iterations: int = 10) -> AgentRunResult:
     tools_called = []
     prediction_id = None
     annotated_image = None
+    tokens_used = TokenUsage()
+    context_limit_exceeded = False
 
     for iteration in range(1, max_iterations + 1):
         response: AIMessage = llm_with_tools.invoke(messages)
         messages.append(response)
+
+        latest_tokens = read_token_usage(response)
+        tokens_used = add_token_usage(tokens_used, latest_tokens)
+
+        if latest_tokens.input and is_near_context_limit(
+            latest_tokens.input,
+            MODEL_PROFILE,
+        ):
+            context_limit_exceeded = True
 
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
@@ -126,8 +218,10 @@ def run_agent(history: list, max_iterations: int = 10) -> AgentRunResult:
                 response=response.content,
                 prediction_id=prediction_id,
                 annotated_image=annotated_image,
+                tokens_used=tokens_used,
                 iterations=iteration,
                 tools_called=tools_called,
+                context_limit_exceeded=context_limit_exceeded,
             )
 
         # Execute every tool the model requested
@@ -149,6 +243,7 @@ def run_agent(history: list, max_iterations: int = 10) -> AgentRunResult:
         response="I reached the maximum number of tool calls and could not finish safely.",
         prediction_id=prediction_id,
         annotated_image=annotated_image,
+        tokens_used=tokens_used,
         iterations=max_iterations,
         tools_called=tools_called,
         context_limit_exceeded=True,
@@ -184,6 +279,7 @@ class ChatResponse(BaseModel):
     response: str
     prediction_id: Optional[str] = None
     annotated_image: Optional[str] = None
+    tokens_used: TokenUsage = Field(default_factory=TokenUsage)
     agent_loop_time_s: float = 0.0
     iterations: int = 0
     tools_called: list[str] = Field(default_factory=list)
@@ -215,6 +311,7 @@ def chat(request: ChatRequest):
             response=agent_result.response,
             prediction_id=agent_result.prediction_id,
             annotated_image=agent_result.annotated_image,
+            tokens_used=agent_result.tokens_used,
             agent_loop_time_s=agent_loop_time_s,
             iterations=agent_result.iterations,
             tools_called=agent_result.tools_called,
