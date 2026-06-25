@@ -20,18 +20,30 @@ Configure environment:
 
 ```bash
 cp .env.example .env
-# Edit .env and set at least OPENAI_API_KEY (or another provider key) and MODEL
+# Edit .env if you want to change the Bedrock model or YOLO URL
 ```
+
+The agent uses Amazon Bedrock through the AWS SDK. Configure AWS credentials
+with `aws configure`; do not copy AWS keys into `.env` or the source code.
 
 `.env` variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | - | Required for OpenAI models |
-| `ANTHROPIC_API_KEY` | - | Required for Anthropic models |
-| `GOOGLE_API_KEY` | - | Required for Google models |
-| `MODEL` | `claude-sonnet-4-6` | Any model string supported by `init_chat_model` |
+| `MODEL` | `bedrock/amazon.nova-lite-v1:0` | Bedrock model used by the agent |
+| `AWS_REGION` | `us-east-1` | AWS region for Bedrock |
 | `YOLO_SERVICE_URL` | `http://localhost:8080` | URL of the YOLO microservice |
+
+Allowed Bedrock models:
+
+```text
+bedrock/anthropic.claude-3-haiku-20240307-v1:0
+bedrock/amazon.nova-micro-v1:0
+bedrock/amazon.nova-lite-v1:0
+bedrock/openai.gpt-oss-20b-1:0
+bedrock/meta.llama3-1-8b-instruct-v1:0
+bedrock/mistral.mistral-7b-instruct-v0:2
+```
 
 ## Running
 

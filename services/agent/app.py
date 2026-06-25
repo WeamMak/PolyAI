@@ -26,20 +26,33 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 YOLO_SERVICE_URL = os.environ.get("YOLO_SERVICE_URL", "http://localhost:8080")
-MODEL = os.environ.get("MODEL")
+AWS_REGION = os.environ.get(
+    "AWS_REGION",
+    os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+)
+BEDROCK_MODEL_PREFIX = "bedrock/"
+DEFAULT_MODEL = f"{BEDROCK_MODEL_PREFIX}amazon.nova-lite-v1:0"
+MODEL = os.environ.get("MODEL", DEFAULT_MODEL)
+BEDROCK_MODEL_ID = MODEL.removeprefix(BEDROCK_MODEL_PREFIX)
 
-# Text-only models
-ALLOWED_MODELS = {
-    "openai:gpt-5.4-mini",
-    "anthropic:claude-haiku-4-5",
-    "google_genai:gemini-2.5-flash",
+# Bedrock text-only models allowed for the course.
+ALLOWED_BEDROCK_MODEL_IDS = {
+    "anthropic.claude-3-haiku-20240307-v1:0",
+    "amazon.nova-micro-v1:0",
+    "amazon.nova-lite-v1:0",
+    "openai.gpt-oss-20b-1:0",
+    "meta.llama3-1-8b-instruct-v1:0",
+    "mistral.mistral-7b-instruct-v0:2",
 }
 
-if MODEL not in ALLOWED_MODELS:
-    allowed_list = "\n  ".join(sorted(ALLOWED_MODELS))
+if BEDROCK_MODEL_ID not in ALLOWED_BEDROCK_MODEL_IDS:
+    allowed_list = "\n  ".join(
+        f"{BEDROCK_MODEL_PREFIX}{model_id}"
+        for model_id in sorted(ALLOWED_BEDROCK_MODEL_IDS)
+    )
     raise SystemExit(
         f"\n[ERROR] MODEL='{MODEL}' is not allowed.\n"
-        f"Set MODEL in your .env to one of the supported text-only models:\n  {allowed_list}\n"
+        f"Set MODEL in your .env to one of the supported Bedrock models:\n  {allowed_list}\n"
     )
 
 SYSTEM_PROMPT = (
@@ -91,7 +104,12 @@ TOOLS = {
     detect_objects.name: detect_objects
 }
 
-llm = init_chat_model(MODEL, temperature=0)
+llm = init_chat_model(
+    BEDROCK_MODEL_ID,
+    model_provider="bedrock_converse",
+    temperature=0,
+    region_name=AWS_REGION,
+)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
