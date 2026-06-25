@@ -213,7 +213,7 @@ llm = init_chat_model(
     temperature=0,
     rate_limiter=llm_rate_limiter,
 )
-llm = init_chat_model(MODEL, temperature=0)
+
 MODEL_PROFILE = getattr(llm, "profile", None) or {}
 validate_model_profile(MODEL, MODEL_PROFILE)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
