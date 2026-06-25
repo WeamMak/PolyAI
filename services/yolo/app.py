@@ -1,6 +1,7 @@
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from prometheus_fastapi_instrumentator import Instrumentator
+from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from ultralytics import YOLO
@@ -15,6 +16,13 @@ import sys
 
 from db import engine, get_db
 from models import Base, DetectionObject, PredictionSession
+
+
+class PredictResponse(BaseModel):
+    prediction_uid: str
+    detection_count: int
+    labels: list[str]
+    time_took: float
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -111,7 +119,7 @@ def save_detection_object(db, prediction_uid, label, score, box):
     db.add(row)
 
 
-@app.post("/predict")
+@app.post("/predict", response_model=PredictResponse)
 def predict(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
     Predict objects in an image.

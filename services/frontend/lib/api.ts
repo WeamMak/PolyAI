@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./types";
+import type { ChatMessage, ChatResponse } from "./types";
 
 const AGENT_URL = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:8000";
 
@@ -12,6 +12,6 @@ export async function sendMessage(messages: ChatMessage[]): Promise<string> {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(text || res.statusText);
   }
-  const data = await res.json();
-  return data.response as string;
+  const data = (await res.json()) as ChatResponse;
+  return data.response;
 }

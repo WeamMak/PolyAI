@@ -11,6 +11,8 @@ from sqlalchemy.orm import sessionmaker
 os.environ.setdefault("CONFIDENCE_THRESHOLD", "0.5")
 
 from app import (
+    PredictResponse,
+    app as fastapi_app,
     get_confidence_threshold,
     get_detection_objects_by_score,
     get_prediction_by_uid,
@@ -77,6 +79,30 @@ def insert_prediction_for_label_test(db_session):
 def assert_http_error(error, status_code, detail):
     assert error.value.status_code == status_code
     assert error.value.detail == detail
+
+
+def test_predict_route_uses_structured_response_model():
+    route = next(
+        route
+        for route in fastapi_app.routes
+        if route.path == "/predict" and "POST" in route.methods
+    )
+
+    assert route.response_model is PredictResponse
+
+
+def test_predict_response_model_accepts_expected_shape():
+    response = PredictResponse(
+        prediction_uid="a1b2c3",
+        detection_count=3,
+        labels=["person", "dog", "cat"],
+        time_took=1.23,
+    )
+
+    assert response.prediction_uid == "a1b2c3"
+    assert response.detection_count == 3
+    assert response.labels == ["person", "dog", "cat"]
+    assert response.time_took == 1.23
 
 
 def test_get_confidence_threshold_uses_default(monkeypatch):
