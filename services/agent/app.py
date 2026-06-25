@@ -2,9 +2,11 @@ import base64
 import io
 import json
 import logging
+import math
 import os
 import time
 from contextvars import ContextVar
+from threading import Lock
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -18,15 +20,21 @@ logging.getLogger("langchain").setLevel(logging.DEBUG)
 logging.getLogger("langchain_core").setLevel(logging.DEBUG)
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 YOLO_SERVICE_URL = os.environ.get("YOLO_SERVICE_URL", "http://localhost:8080")
 MODEL = os.environ.get("MODEL")
+
+LLM_REQUESTS_PER_SECOND = 0.25  # 15 request per minute
+LLM_RATE_LIMIT_CHECK_SECONDS = 0.1
+LLM_RATE_LIMIT_BUCKET_SIZE = 1
+LLM_RATE_LIMIT_SECONDS = 1 / LLM_REQUESTS_PER_SECOND
 
 # Text-only models
 ALLOWED_MODELS = {
@@ -48,6 +56,31 @@ SYSTEM_PROMPT = (
 )
 
 _current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
+_chat_rate_limit_lock = Lock()
+_next_chat_request_at = 0.0
+
+
+def check_chat_rate_limit():
+    """
+    Return 429 immediately when the next LLM request slot is not ready yet.
+
+    The LangChain rate limiter still protects the provider call itself. This
+    check keeps users from waiting silently at the /chat API boundary.
+    """
+    global _next_chat_request_at
+
+    now = time.monotonic()
+    with _chat_rate_limit_lock:
+        wait_seconds = _next_chat_request_at - now
+        if wait_seconds > 0:
+            retry_after = math.ceil(wait_seconds)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit reached. Please try again in {retry_after} seconds.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        _next_chat_request_at = now + LLM_RATE_LIMIT_SECONDS
 
 @tool
 def detect_objects() -> str:
@@ -91,7 +124,17 @@ TOOLS = {
     detect_objects.name: detect_objects
 }
 
-llm = init_chat_model(MODEL, temperature=0)
+llm_rate_limiter = InMemoryRateLimiter(
+    requests_per_second=LLM_REQUESTS_PER_SECOND,
+    check_every_n_seconds=LLM_RATE_LIMIT_CHECK_SECONDS,
+    max_bucket_size=LLM_RATE_LIMIT_BUCKET_SIZE,
+)
+
+llm = init_chat_model(
+    MODEL,
+    temperature=0,
+    rate_limiter=llm_rate_limiter,
+)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
@@ -192,6 +235,8 @@ class ChatResponse(BaseModel):
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
+    check_chat_rate_limit()
+
     lc_messages = []
     latest_image = None
 
