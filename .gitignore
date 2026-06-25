@@ -48,3 +48,7 @@ services/frontend/out/
 
 services/yolo/coverage.xml
 *.pem
+
+# Skill eval reports
+.agents/skills/*/reports/*
+!.agents/skills/*/reports/.gitkeep
