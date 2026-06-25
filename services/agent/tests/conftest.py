@@ -21,8 +21,8 @@ class StartupModelStub:
 
 @pytest.fixture
 def agent_module(monkeypatch):
-    monkeypatch.setenv("MODEL", "openai:gpt-5.4-mini")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("MODEL", "bedrock/openai.gpt-oss-20b-1:0")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
 
     agent_dir = Path(__file__).resolve().parents[1]
     if str(agent_dir) not in sys.path:
