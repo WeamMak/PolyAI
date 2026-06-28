@@ -1,6 +1,6 @@
 # YOLO Object Detection Service
 
-This is a FastAPI-based web service that performs object detection on uploaded images using the YOLOv8 model. The application analyzes images, detects objects, and stores prediction results with SQLAlchemy for later retrieval. SQLite is used by default.
+This is a FastAPI-based web service that performs object detection on images stored in S3 using the YOLOv8 model. The application analyzes images, detects objects, stores prediction results with SQLAlchemy, and returns S3 keys for downstream services. SQLite is used by default.
 
 ## Setup Instructions
 
@@ -11,6 +11,13 @@ This is a FastAPI-based web service that performs object detection on uploaded i
 ```bash
 pip install -r torch-requirements.txt
 pip install -r requirements.txt
+```
+
+1. Configure environment:
+
+```bash
+cp .env.example .env
+# Edit .env to set your S3 bucket and AWS region
 ```
 
 1. Run the application:
@@ -28,6 +35,8 @@ You can test the api endpoints using `curl` or Postman. See the API Endpoints se
 | Variable | Default | Description |
 |---|---|---|
 | `CONFIDENCE_THRESHOLD` | `0.5` | Minimum confidence score (0.0–1.0) for a detection to be reported. Raise it to get only high-confidence results; lower it to catch more objects. |
+| `AWS_REGION` | `us-east-1` | AWS region for S3 |
+| `AWS_S3_BUCKET` | required | S3 bucket used to read original images and store predicted images |
 | `DB_BACKEND` | `sqlite` | Database backend. Use `sqlite` for local development or `postgres` for PostgreSQL. |
 | `DATABASE_URL` | `sqlite:///./predictions.db` | SQLite database URL used when `DB_BACKEND` is not `postgres`. |
 | `DB_USER` | `user` | PostgreSQL username when `DB_BACKEND=postgres`. |
@@ -65,21 +74,36 @@ pytest tests/
 
 ## API Endpoints
 
-* `POST /predict` - Upload an image for object detection
+* `POST /predict` - Predict objects in an image stored in S3 and return the predicted image S3 key
 * `GET /prediction/{uid}` - Get details of a specific prediction by ID
 * `GET /predictions/label/{label}` - Get all predictions containing a specific object label (e.g., "person", "car")
 * `GET /predictions/score/{min_score}` - Get predictions with confidence score above threshold (e.g., 0.5)
-* `GET /prediction/{uid}/image` - Get the processed image with detection boxes
-* `GET /image/{type}/{filename}` - Get original or predicted image by filename
+* `GET /prediction/{uid}/image` - Get the processed image with detection boxes for manual/debug access
 
 ## Testing the API
 
 You can use tools like curl, Postman, or a web browser to test the endpoints. For example:
 
-1. Upload an image:
+1. Predict objects in an S3 image:
 ```bash
-curl -X POST -F "file=@your_image.jpg" http://localhost:8080/predict
+curl -X POST http://localhost:8080/predict \
+  -H "Content-Type: application/json" \
+  -d '{"image_s3_key": "chats/chat-123/image-123/original/image.jpg"}'
 ```
+
+Example response:
+
+```json
+{
+  "prediction_uid": "prediction-123",
+  "detection_count": 1,
+  "labels": ["person"],
+  "time_took": 0.42,
+  "predicted_image_s3_key": "chats/chat-123/image-123/predicted/image.jpg"
+}
+```
+
+The Agent uses `predicted_image_s3_key` to read the predicted image directly from S3. It does not call `GET /prediction/{uid}/image`.
 
 2. View detection results (replace {uid} with the ID returned from the upload):
 ```bash

@@ -1,16 +1,17 @@
-import io
 import os
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("CONFIDENCE_THRESHOLD", "0.5")
 
+import app as yolo_app
 from app import (
+    PredictRequest,
     PredictResponse,
     app as fastapi_app,
     get_confidence_threshold,
@@ -97,12 +98,17 @@ def test_predict_response_model_accepts_expected_shape():
         detection_count=3,
         labels=["person", "dog", "cat"],
         time_took=1.23,
+        predicted_image_s3_key="chats/chat-123/image-123/predicted/image.jpg",
     )
 
     assert response.prediction_uid == "a1b2c3"
     assert response.detection_count == 3
     assert response.labels == ["person", "dog", "cat"]
     assert response.time_took == 1.23
+    assert (
+        response.predicted_image_s3_key
+        == "chats/chat-123/image-123/predicted/image.jpg"
+    )
 
 
 def test_get_confidence_threshold_uses_default(monkeypatch):
@@ -191,10 +197,10 @@ def test_get_detection_objects_by_score_returns_400_when_score_is_too_high():
 
 
 def test_predict_rejects_non_image_file(db_session):
-    file = UploadFile(io.BytesIO(b"hello"), filename="notes.txt")
+    request = PredictRequest(image_s3_key="chats/chat-123/original/notes.txt")
 
     with pytest.raises(HTTPException) as error:
-        predict(file, db_session)
+        predict(request, db_session)
 
     assert_http_error(error, 400, "Only image files are supported")
 
@@ -218,16 +224,19 @@ def test_get_prediction_by_uid_returns_404_when_missing(db_session):
     assert_http_error(error, 404, "Prediction not found")
 
 
-def test_get_prediction_image_returns_file(db_session, tmp_path):
-    image_path = tmp_path / "predicted.jpg"
-    image_path.write_bytes(b"fake image bytes")
+def test_get_prediction_image_returns_s3_image(db_session, monkeypatch):
+    monkeypatch.setattr(
+        yolo_app,
+        "read_s3_file",
+        lambda image_s3_key: b"fake image bytes",
+    )
 
     db_session.add(
         PredictionSession(
             uid="image-123",
             timestamp=datetime(2024, 1, 1, 12, 0, 0),
-            original_image="uploads/original/test.jpg",
-            predicted_image=str(image_path),
+            original_image="chats/chat-123/image-123/original/test.jpg",
+            predicted_image="chats/chat-123/image-123/predicted/test.jpg",
         )
     )
     db_session.commit()
@@ -235,7 +244,8 @@ def test_get_prediction_image_returns_file(db_session, tmp_path):
     response = get_prediction_image("image-123", db_session)
 
     assert response.status_code == 200
-    assert response.path == str(image_path)
+    assert response.media_type == "image/jpeg"
+    assert response.body == b"fake image bytes"
 
 
 def test_get_prediction_image_returns_404_when_missing(db_session):
