@@ -21,7 +21,7 @@ class StartupModelStub:
 
 @pytest.fixture
 def agent_module(monkeypatch):
-    monkeypatch.setenv("MODEL", "bedrock/amazon.nova-lite-v1:0")
+    monkeypatch.setenv("MODEL", "bedrock/openai.gpt-oss-20b-1:0")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
 
     agent_dir = Path(__file__).resolve().parents[1]
