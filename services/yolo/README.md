@@ -1,6 +1,6 @@
 # YOLO Object Detection Service
 
-This is a FastAPI-based web service that performs object detection on uploaded images using the YOLOv8 model. The application analyzes images, detects objects, and stores prediction results with SQLAlchemy for later retrieval. SQLite is used by default.
+This is a FastAPI-based web service that performs object detection on images stored in S3 using the YOLOv8 model. The application analyzes images, detects objects, and stores prediction results with SQLAlchemy for later retrieval. SQLite is used by default.
 
 ## Setup Instructions
 
@@ -74,7 +74,7 @@ pytest tests/
 
 ## API Endpoints
 
-* `POST /predict` - Upload an image for object detection
+* `POST /predict` - Predict objects in an image stored in S3
 * `GET /prediction/{uid}` - Get details of a specific prediction by ID
 * `GET /predictions/label/{label}` - Get all predictions containing a specific object label (e.g., "person", "car")
 * `GET /predictions/score/{min_score}` - Get predictions with confidence score above threshold (e.g., 0.5)
@@ -85,9 +85,11 @@ pytest tests/
 
 You can use tools like curl, Postman, or a web browser to test the endpoints. For example:
 
-1. Upload an image:
+1. Predict objects in an S3 image:
 ```bash
-curl -X POST -F "file=@your_image.jpg" http://localhost:8080/predict
+curl -X POST http://localhost:8080/predict \
+  -H "Content-Type: application/json" \
+  -d '{"image_s3_key": "chats/chat-123/image-123/original/image.jpg"}'
 ```
 
 2. View detection results (replace {uid} with the ID returned from the upload):

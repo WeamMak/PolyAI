@@ -1,12 +1,13 @@
 import os
+import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from fastapi import UploadFile
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import predict
+from app import PredictRequest, predict
 from models import Base
 
 
@@ -38,9 +39,17 @@ class TestPredictionTime(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_predict_includes_processing_time(self):
-        with open(TEST_IMAGE, "rb") as f:
-            file = UploadFile(f, filename="beatles.jpeg")
-            data = predict(file, self.db)
+        def fake_download_s3_file(image_s3_key, local_path):
+            shutil.copyfile(TEST_IMAGE, local_path)
+
+        request = PredictRequest(
+            image_s3_key="chats/chat-123/image-123/original/beatles.jpeg"
+        )
+
+        with patch("app.download_s3_file", side_effect=fake_download_s3_file), patch(
+            "app.upload_s3_file"
+        ):
+            data = predict(request, self.db)
 
         self.assertIn("time_took", data)
         self.assertIsInstance(data["time_took"], (int, float))
