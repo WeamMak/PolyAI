@@ -26,6 +26,35 @@ class FakeTool:
         )
 
 
+class FakeYoloResponse:
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {
+            "prediction_uid": "prediction-123",
+            "detection_count": 1,
+            "labels": ["person"],
+            "time_took": 0.2,
+        }
+
+
+class FakeHttpClient:
+    def __init__(self, timeout):
+        self.timeout = timeout
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        pass
+
+    def post(self, url, json):
+        self.url = url
+        self.json_body = json
+        return FakeYoloResponse()
+
+
 def test_run_agent_returns_final_response_without_tools(agent_module, monkeypatch):
     fake_llm = FakeLLM([AIMessage(content="Hello from the agent.")])
     monkeypatch.setattr(agent_module, "llm_with_tools", fake_llm)
@@ -72,3 +101,28 @@ def test_run_agent_executes_tool_call(agent_module, monkeypatch):
     assert fake_tool.calls[0]["name"] == "detect_objects"
     assert fake_tool.calls[0]["id"] == "call-1"
     assert any(isinstance(message, ToolMessage) for message in fake_llm.calls[1])
+
+
+def test_detect_objects_sends_s3_key_to_yolo(agent_module, monkeypatch):
+    fake_client = FakeHttpClient(timeout=30.0)
+    monkeypatch.setattr(agent_module.httpx, "Client", lambda timeout: fake_client)
+
+    token = agent_module._current_image_s3_key.set(
+        "chats/chat-123/image-123/original/image.jpg"
+    )
+    try:
+        result = agent_module.detect_objects.invoke({})
+    finally:
+        agent_module._current_image_s3_key.reset(token)
+
+    assert fake_client.timeout == 30.0
+    assert fake_client.url == f"{agent_module.YOLO_SERVICE_URL}/predict"
+    assert fake_client.json_body == {
+        "image_s3_key": "chats/chat-123/image-123/original/image.jpg"
+    }
+    assert json.loads(result) == {
+        "prediction_uid": "prediction-123",
+        "detection_count": 1,
+        "labels": ["person"],
+        "time_took": 0.2,
+    }

@@ -152,9 +152,14 @@ def detect_objects() -> str:
     if not image_s3_key:
         return json.dumps({"error": "No image was provided by the user."})
 
-    return json.dumps({
-        "error": "Image was uploaded to S3, but YOLO S3 integration is not finished yet."
-    })
+    with httpx.Client(timeout=30.0) as client:
+        response = client.post(
+            f"{YOLO_SERVICE_URL}/predict",
+            json={"image_s3_key": image_s3_key},
+        )
+        response.raise_for_status()
+
+    return json.dumps(response.json())
 
 
 def fetch_annotated_image_b64(prediction_uid: str) -> Optional[str]:
