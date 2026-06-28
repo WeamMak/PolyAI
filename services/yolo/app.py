@@ -15,6 +15,9 @@ import time
 import signal
 import sys
 from botocore.exceptions import BotoCoreError, ClientError
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from db import engine, get_db
 from models import Base, DetectionObject, PredictionSession
