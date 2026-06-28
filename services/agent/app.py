@@ -1,10 +1,11 @@
 import base64
-import io
+import binascii
 import json
 import logging
 import math
 import os
 import time
+import uuid
 from contextvars import ContextVar
 from threading import Lock
 from typing import Optional
@@ -20,6 +21,8 @@ logging.getLogger("langchain").setLevel(logging.DEBUG)
 logging.getLogger("langchain_core").setLevel(logging.DEBUG)
 
 import httpx
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain.chat_models import init_chat_model
@@ -33,6 +36,7 @@ AWS_REGION = os.environ.get(
     "AWS_REGION",
     os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
 )
+AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET")
 BEDROCK_MODEL_PREFIX = "bedrock/"
 DEFAULT_MODEL = f"{BEDROCK_MODEL_PREFIX}openai.gpt-oss-20b-1:0"
 MODEL = os.environ.get("MODEL", DEFAULT_MODEL)
@@ -72,7 +76,7 @@ SYSTEM_PROMPT = (
 REQUIRED_MODEL_FEATURES = ["structured_output", "tool_calling"]
 CONTEXT_LIMIT_WARNING_RATIO = 0.9
 
-_current_image_b64: ContextVar[Optional[str]] = ContextVar("current_image_b64", default=None)
+_current_image_s3_key: ContextVar[Optional[str]] = ContextVar("current_image_s3_key", default=None)
 _chat_rate_limit_lock = Lock()
 _next_chat_request_at = 0.0
 
@@ -99,21 +103,58 @@ def check_chat_rate_limit():
 
         _next_chat_request_at = now + LLM_RATE_LIMIT_SECONDS
 
+
+def get_s3_client():
+    return boto3.client("s3", region_name=AWS_REGION)
+
+
+def read_image_type(image_bytes: bytes):
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return ".jpg", "image/jpeg"
+
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png", "image/png"
+
+    raise HTTPException(status_code=400, detail="Only JPEG and PNG images are supported")
+
+
+def upload_image_base64_to_s3(image_b64: str, chat_id: str) -> str:
+    if not AWS_S3_BUCKET:
+        raise HTTPException(status_code=500, detail="AWS_S3_BUCKET is not configured")
+
+    try:
+        image_bytes = base64.b64decode(image_b64.strip(), validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid image_base64 value")
+
+    ext, content_type = read_image_type(image_bytes)
+    image_id = str(uuid.uuid4())
+    image_s3_key = f"chats/{chat_id}/{image_id}/original/image{ext}"
+
+    try:
+        get_s3_client().put_object(
+            Bucket=AWS_S3_BUCKET,
+            Key=image_s3_key,
+            Body=image_bytes,
+            ContentType=content_type,
+        )
+    except (BotoCoreError, ClientError):
+        logging.exception("Could not upload image to S3")
+        raise HTTPException(status_code=502, detail="Could not upload image to S3")
+
+    return image_s3_key
+
+
 @tool
 def detect_objects() -> str:
     """Detect and identify objects in the image provided by the user using YOLO object detection."""
-    image_b64 = _current_image_b64.get()
-    if not image_b64:
+    image_s3_key = _current_image_s3_key.get()
+    if not image_s3_key:
         return json.dumps({"error": "No image was provided by the user."})
 
-    image_bytes = base64.b64decode(image_b64)
-    with httpx.Client(timeout=30.0) as client:
-        response = client.post(
-            f"{YOLO_SERVICE_URL}/predict",
-            files={"file": ("image.jpg", io.BytesIO(image_bytes), "image/jpeg")},
-        )
-        response.raise_for_status()
-    return json.dumps(response.json())
+    return json.dumps({
+        "error": "Image was uploaded to S3, but YOLO S3 integration is not finished yet."
+    })
 
 
 def fetch_annotated_image_b64(prediction_uid: str) -> Optional[str]:
@@ -374,12 +415,13 @@ def chat(request: ChatRequest):
     check_chat_rate_limit()
 
     lc_messages = []
-    latest_image = None
+    latest_image_b64 = None
+    chat_id = str(uuid.uuid4())
 
     for msg in request.messages:
         if msg.role == "user":
             if msg.image_base64:
-                latest_image = msg.image_base64          # saved for detect_objects tool
+                latest_image_b64 = msg.image_base64
                 content = msg.content + "\n[An image was uploaded. Use existing tools to analyze it according to user instructions.]"
             else:
                 content = msg.content
@@ -387,7 +429,11 @@ def chat(request: ChatRequest):
         else:
             lc_messages.append(AIMessage(content=msg.content))
 
-    token = _current_image_b64.set(latest_image)
+    latest_image_s3_key = None
+    if latest_image_b64:
+        latest_image_s3_key = upload_image_base64_to_s3(latest_image_b64, chat_id)
+
+    token = _current_image_s3_key.set(latest_image_s3_key)
     try:
         start_time = time.time()
         agent_result = run_agent(lc_messages)
@@ -403,7 +449,7 @@ def chat(request: ChatRequest):
             context_limit_exceeded=agent_result.context_limit_exceeded,
         )
     finally:
-        _current_image_b64.reset(token)
+        _current_image_s3_key.reset(token)
 
 
 @app.get("/health")
