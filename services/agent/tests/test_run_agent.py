@@ -1,3 +1,4 @@
+import base64
 import json
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -53,6 +54,28 @@ class FakeHttpClient:
         self.url = url
         self.json_body = json
         return FakeYoloResponse()
+
+
+class FakeAnnotatedImageResponse:
+    content = b"annotated image bytes"
+
+    def raise_for_status(self):
+        pass
+
+
+class FakeAnnotatedImageClient:
+    def __init__(self, timeout):
+        self.timeout = timeout
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        pass
+
+    def get(self, url):
+        self.url = url
+        return FakeAnnotatedImageResponse()
 
 
 def test_run_agent_returns_final_response_without_tools(agent_module, monkeypatch):
@@ -126,3 +149,18 @@ def test_detect_objects_sends_s3_key_to_yolo(agent_module, monkeypatch):
         "labels": ["person"],
         "time_took": 0.2,
     }
+
+
+def test_fetch_annotated_image_returns_base64_for_frontend(agent_module, monkeypatch):
+    fake_client = FakeAnnotatedImageClient(timeout=30.0)
+    monkeypatch.setattr(agent_module.httpx, "Client", lambda timeout: fake_client)
+
+    result = agent_module.fetch_annotated_image_b64("prediction-123")
+
+    expected = base64.b64encode(b"annotated image bytes").decode("utf-8")
+    assert result == expected
+    assert fake_client.timeout == 30.0
+    assert (
+        fake_client.url
+        == f"{agent_module.YOLO_SERVICE_URL}/prediction/prediction-123/image"
+    )

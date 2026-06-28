@@ -103,11 +103,17 @@ Response:
 ```json
 {
   "response": "string",
+  "prediction_id": "string or null",
+  "annotated_image": "base64-encoded annotated JPEG or null",
   "tokens_used": {
     "input": 312,
     "output": 22,
     "total": 334
-  }
+  },
+  "agent_loop_time_s": 1.23,
+  "iterations": 2,
+  "tools_called": ["detect_objects"],
+  "context_limit_exceeded": false
 }
 ```
 
