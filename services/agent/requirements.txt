@@ -12,3 +12,7 @@ langchain-aws
 
 httpx
 pydantic
+
+# Testing
+pytest==7.4.0
+httpx2

@@ -101,7 +101,12 @@ Response:
 
 ```json
 {
-  "response": "string"
+  "response": "string",
+  "tokens_used": {
+    "input": 312,
+    "output": 22,
+    "total": 334
+  }
 }
 ```
 
