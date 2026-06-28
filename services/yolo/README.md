@@ -13,6 +13,13 @@ pip install -r torch-requirements.txt
 pip install -r requirements.txt
 ```
 
+1. Configure environment:
+
+```bash
+cp .env.example .env
+# Edit .env to set your S3 bucket and AWS region
+```
+
 1. Run the application:
 
 ```bash
@@ -28,6 +35,8 @@ You can test the api endpoints using `curl` or Postman. See the API Endpoints se
 | Variable | Default | Description |
 |---|---|---|
 | `CONFIDENCE_THRESHOLD` | `0.5` | Minimum confidence score (0.0–1.0) for a detection to be reported. Raise it to get only high-confidence results; lower it to catch more objects. |
+| `AWS_REGION` | `us-east-1` | AWS region for S3 |
+| `AWS_S3_BUCKET` | required | S3 bucket used to read original images and store predicted images |
 | `DB_BACKEND` | `sqlite` | Database backend. Use `sqlite` for local development or `postgres` for PostgreSQL. |
 | `DATABASE_URL` | `sqlite:///./predictions.db` | SQLite database URL used when `DB_BACKEND` is not `postgres`. |
 | `DB_USER` | `user` | PostgreSQL username when `DB_BACKEND=postgres`. |

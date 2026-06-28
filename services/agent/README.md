@@ -20,7 +20,7 @@ Configure environment:
 
 ```bash
 cp .env.example .env
-# Edit .env if you want to change the Bedrock model or YOLO URL
+# Edit .env to set your S3 bucket, Bedrock model, or YOLO URL
 ```
 
 The agent uses Amazon Bedrock through the AWS SDK. Configure AWS credentials
@@ -31,7 +31,8 @@ with `aws configure`; do not copy AWS keys into `.env` or the source code.
 | Variable | Default | Description |
 |---|---|---|
 | `MODEL` | `bedrock/amazon.nova-lite-v1:0` | Bedrock model used by the agent |
-| `AWS_REGION` | `us-east-1` | AWS region for Bedrock |
+| `AWS_REGION` | `us-east-1` | AWS region for Bedrock and S3 |
+| `AWS_S3_BUCKET` | required | S3 bucket used to store uploaded images |
 | `YOLO_SERVICE_URL` | `http://localhost:8080` | URL of the YOLO microservice |
 
 Allowed Bedrock models:
