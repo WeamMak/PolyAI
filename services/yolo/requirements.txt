@@ -20,6 +20,9 @@ prometheus-fastapi-instrumentator>=6.0.0
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.9
 
+# AWS
+boto3
+
 # Testing
 pytest==7.4.0
 pytest-cov==4.1.0
