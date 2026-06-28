@@ -1,6 +1,6 @@
 # YOLO Object Detection Service
 
-This is a FastAPI-based web service that performs object detection on images stored in S3 using the YOLOv8 model. The application analyzes images, detects objects, and stores prediction results with SQLAlchemy for later retrieval. SQLite is used by default.
+This is a FastAPI-based web service that performs object detection on images stored in S3 using the YOLOv8 model. The application analyzes images, detects objects, stores prediction results with SQLAlchemy, and returns S3 keys for downstream services. SQLite is used by default.
 
 ## Setup Instructions
 
@@ -74,12 +74,11 @@ pytest tests/
 
 ## API Endpoints
 
-* `POST /predict` - Predict objects in an image stored in S3
+* `POST /predict` - Predict objects in an image stored in S3 and return the predicted image S3 key
 * `GET /prediction/{uid}` - Get details of a specific prediction by ID
 * `GET /predictions/label/{label}` - Get all predictions containing a specific object label (e.g., "person", "car")
 * `GET /predictions/score/{min_score}` - Get predictions with confidence score above threshold (e.g., 0.5)
-* `GET /prediction/{uid}/image` - Get the processed image with detection boxes
-* `GET /image/{type}/{filename}` - Get original or predicted image by filename
+* `GET /prediction/{uid}/image` - Get the processed image with detection boxes for manual/debug access
 
 ## Testing the API
 
@@ -91,6 +90,20 @@ curl -X POST http://localhost:8080/predict \
   -H "Content-Type: application/json" \
   -d '{"image_s3_key": "chats/chat-123/image-123/original/image.jpg"}'
 ```
+
+Example response:
+
+```json
+{
+  "prediction_uid": "prediction-123",
+  "detection_count": 1,
+  "labels": ["person"],
+  "time_took": 0.42,
+  "predicted_image_s3_key": "chats/chat-123/image-123/predicted/image.jpg"
+}
+```
+
+The Agent uses `predicted_image_s3_key` to read the predicted image directly from S3. It does not call `GET /prediction/{uid}/image`.
 
 2. View detection results (replace {uid} with the ID returned from the upload):
 ```bash

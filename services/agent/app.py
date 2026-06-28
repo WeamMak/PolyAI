@@ -162,24 +162,28 @@ def detect_objects() -> str:
     return json.dumps(response.json())
 
 
-def fetch_annotated_image_b64(prediction_uid: str) -> Optional[str]:
+def fetch_s3_image_b64(image_s3_key: str) -> Optional[str]:
     """
-    Fetch the annotated image from YOLO and encode it for the API response.
+    Fetch an image from S3 and encode it for the API response.
 
     This value is not added to the LangChain messages, so the LLM still only
     receives the text JSON returned by the detection tool.
     """
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(
-                f"{YOLO_SERVICE_URL}/prediction/{prediction_uid}/image"
-            )
-            response.raise_for_status()
-    except httpx.HTTPError:
-        logging.exception("Could not fetch annotated image for %s", prediction_uid)
+    if not AWS_S3_BUCKET:
+        logging.error("AWS_S3_BUCKET is not configured")
         return None
 
-    return base64.b64encode(response.content).decode("utf-8")
+    try:
+        response = get_s3_client().get_object(
+            Bucket=AWS_S3_BUCKET,
+            Key=image_s3_key,
+        )
+        image_bytes = response["Body"].read()
+    except (BotoCoreError, ClientError):
+        logging.exception("Could not fetch image from S3: %s", image_s3_key)
+        return None
+
+    return base64.b64encode(image_bytes).decode("utf-8")
 
 
 # Registry: map tool name -> tool function
@@ -364,7 +368,10 @@ def run_agent(history: list, max_iterations: int = 10) -> AgentRunResult:
                 tool_data = json.loads(tool_result.content)
                 if tool_data.get("prediction_uid"):
                     prediction_id = tool_data["prediction_uid"]
-                    annotated_image = fetch_annotated_image_b64(prediction_id)
+                if tool_data.get("predicted_image_s3_key"):
+                    annotated_image = fetch_s3_image_b64(
+                        tool_data["predicted_image_s3_key"]
+                    )
             except json.JSONDecodeError:
                 pass
 

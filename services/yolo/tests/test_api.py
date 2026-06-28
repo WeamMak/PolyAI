@@ -98,12 +98,17 @@ def test_predict_response_model_accepts_expected_shape():
         detection_count=3,
         labels=["person", "dog", "cat"],
         time_took=1.23,
+        predicted_image_s3_key="chats/chat-123/image-123/predicted/image.jpg",
     )
 
     assert response.prediction_uid == "a1b2c3"
     assert response.detection_count == 3
     assert response.labels == ["person", "dog", "cat"]
     assert response.time_took == 1.23
+    assert (
+        response.predicted_image_s3_key
+        == "chats/chat-123/image-123/predicted/image.jpg"
+    )
 
 
 def test_get_confidence_threshold_uses_default(monkeypatch):

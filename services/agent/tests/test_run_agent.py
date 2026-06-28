@@ -37,6 +37,9 @@ class FakeYoloResponse:
             "detection_count": 1,
             "labels": ["person"],
             "time_took": 0.2,
+            "predicted_image_s3_key": (
+                "chats/chat-123/image-123/predicted/image.jpg"
+            ),
         }
 
 
@@ -56,26 +59,20 @@ class FakeHttpClient:
         return FakeYoloResponse()
 
 
-class FakeAnnotatedImageResponse:
-    content = b"annotated image bytes"
-
-    def raise_for_status(self):
-        pass
+class FakeS3Body:
+    def read(self):
+        return b"annotated image bytes"
 
 
-class FakeAnnotatedImageClient:
-    def __init__(self, timeout):
-        self.timeout = timeout
+class FakeS3Client:
+    def __init__(self):
+        self.bucket = None
+        self.key = None
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        pass
-
-    def get(self, url):
-        self.url = url
-        return FakeAnnotatedImageResponse()
+    def get_object(self, Bucket, Key):
+        self.bucket = Bucket
+        self.key = Key
+        return {"Body": FakeS3Body()}
 
 
 def test_run_agent_returns_final_response_without_tools(agent_module, monkeypatch):
@@ -104,14 +101,29 @@ def test_run_agent_executes_tool_call(agent_module, monkeypatch):
             AIMessage(content="The image contains a person."),
         ]
     )
-    fake_tool = FakeTool(json.dumps({"prediction_uid": "prediction-123"}))
+    fake_tool = FakeTool(
+        json.dumps(
+            {
+                "prediction_uid": "prediction-123",
+                "predicted_image_s3_key": (
+                    "chats/chat-123/image-123/predicted/image.jpg"
+                ),
+            }
+        )
+    )
+    captured = {}
 
     monkeypatch.setattr(agent_module, "llm_with_tools", fake_llm)
     monkeypatch.setattr(agent_module, "TOOLS", {"detect_objects": fake_tool})
+
+    def fake_fetch_s3_image_b64(image_s3_key):
+        captured["predicted_image_s3_key"] = image_s3_key
+        return "annotated-image-b64"
+
     monkeypatch.setattr(
         agent_module,
-        "fetch_annotated_image_b64",
-        lambda prediction_uid: "annotated-image-b64",
+        "fetch_s3_image_b64",
+        fake_fetch_s3_image_b64,
     )
 
     result = agent_module.run_agent([HumanMessage(content="Detect objects")])
@@ -121,6 +133,10 @@ def test_run_agent_executes_tool_call(agent_module, monkeypatch):
     assert result.annotated_image == "annotated-image-b64"
     assert result.iterations == 2
     assert result.tools_called == ["detect_objects"]
+    assert (
+        captured["predicted_image_s3_key"]
+        == "chats/chat-123/image-123/predicted/image.jpg"
+    )
     assert fake_tool.calls[0]["name"] == "detect_objects"
     assert fake_tool.calls[0]["id"] == "call-1"
     assert any(isinstance(message, ToolMessage) for message in fake_llm.calls[1])
@@ -148,19 +164,20 @@ def test_detect_objects_sends_s3_key_to_yolo(agent_module, monkeypatch):
         "detection_count": 1,
         "labels": ["person"],
         "time_took": 0.2,
+        "predicted_image_s3_key": "chats/chat-123/image-123/predicted/image.jpg",
     }
 
 
-def test_fetch_annotated_image_returns_base64_for_frontend(agent_module, monkeypatch):
-    fake_client = FakeAnnotatedImageClient(timeout=30.0)
-    monkeypatch.setattr(agent_module.httpx, "Client", lambda timeout: fake_client)
+def test_fetch_s3_image_returns_base64_for_frontend(agent_module, monkeypatch):
+    fake_s3_client = FakeS3Client()
+    monkeypatch.setattr(agent_module, "AWS_S3_BUCKET", "polyai-images")
+    monkeypatch.setattr(agent_module, "get_s3_client", lambda: fake_s3_client)
 
-    result = agent_module.fetch_annotated_image_b64("prediction-123")
+    result = agent_module.fetch_s3_image_b64(
+        "chats/chat-123/image-123/predicted/image.jpg"
+    )
 
     expected = base64.b64encode(b"annotated image bytes").decode("utf-8")
     assert result == expected
-    assert fake_client.timeout == 30.0
-    assert (
-        fake_client.url
-        == f"{agent_module.YOLO_SERVICE_URL}/prediction/prediction-123/image"
-    )
+    assert fake_s3_client.bucket == "polyai-images"
+    assert fake_s3_client.key == "chats/chat-123/image-123/predicted/image.jpg"

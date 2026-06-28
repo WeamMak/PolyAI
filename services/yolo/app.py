@@ -29,6 +29,7 @@ class PredictResponse(BaseModel):
     detection_count: int
     labels: list[str]
     time_took: float
+    predicted_image_s3_key: str
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -262,6 +263,7 @@ def predict(request: PredictRequest, db: Session = Depends(get_db)):
         "detection_count": len(results[0].boxes),
         "labels": detected_labels,
         "time_took": processing_time,
+        "predicted_image_s3_key": predicted_s3_key,
     }
 
 
