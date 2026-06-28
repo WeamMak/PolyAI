@@ -34,9 +34,15 @@ AWS_REGION = os.environ.get(
     os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
 )
 BEDROCK_MODEL_PREFIX = "bedrock/"
-DEFAULT_MODEL = f"{BEDROCK_MODEL_PREFIX}amazon.nova-lite-v1:0"
+DEFAULT_MODEL = f"{BEDROCK_MODEL_PREFIX}openai.gpt-oss-20b-1:0"
 MODEL = os.environ.get("MODEL", DEFAULT_MODEL)
 BEDROCK_MODEL_ID = MODEL.removeprefix(BEDROCK_MODEL_PREFIX)
+
+
+LLM_REQUESTS_PER_SECOND = 0.25  # 15 request per minute
+LLM_RATE_LIMIT_CHECK_SECONDS = 0.1
+LLM_RATE_LIMIT_BUCKET_SIZE = 1
+LLM_RATE_LIMIT_SECONDS = 1 / LLM_REQUESTS_PER_SECOND
 
 # Bedrock text-only models allowed for the course.
 ALLOWED_BEDROCK_MODEL_IDS = {
@@ -46,18 +52,6 @@ ALLOWED_BEDROCK_MODEL_IDS = {
     "openai.gpt-oss-20b-1:0",
     "meta.llama3-1-8b-instruct-v1:0",
     "mistral.mistral-7b-instruct-v0:2",
-}
-
-LLM_REQUESTS_PER_SECOND = 0.25  # 15 request per minute
-LLM_RATE_LIMIT_CHECK_SECONDS = 0.1
-LLM_RATE_LIMIT_BUCKET_SIZE = 1
-LLM_RATE_LIMIT_SECONDS = 1 / LLM_REQUESTS_PER_SECOND
-
-# Text-only models
-ALLOWED_MODELS = {
-    "openai:gpt-5.4-mini",
-    "anthropic:claude-haiku-4-5",
-    "google_genai:gemini-2.5-flash",
 }
 
 if BEDROCK_MODEL_ID not in ALLOWED_BEDROCK_MODEL_IDS:
@@ -215,6 +209,30 @@ def add_token_usage(current: TokenUsage, latest: TokenUsage) -> TokenUsage:
     )
 
 
+def read_response_text(response: AIMessage) -> str:
+    """
+    Convert LangChain message content into the plain text API response.
+    """
+    content = response.content
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+            elif isinstance(block, dict):
+                block_text = block.get("text")
+                if isinstance(block_text, str):
+                    text_parts.append(block_text)
+
+        return "\n".join(text_parts)
+
+    return str(content)
+
+
 def is_near_context_limit(input_tokens: int, profile: dict) -> bool:
     max_input_tokens = profile["max_input_tokens"]
     warning_threshold = max_input_tokens * CONTEXT_LIMIT_WARNING_RATIO
@@ -226,18 +244,17 @@ llm_rate_limiter = InMemoryRateLimiter(
     check_every_n_seconds=LLM_RATE_LIMIT_CHECK_SECONDS,
     max_bucket_size=LLM_RATE_LIMIT_BUCKET_SIZE,
 )
-  
-  
+
 llm = init_chat_model(
     BEDROCK_MODEL_ID,
     model_provider="bedrock_converse",
     temperature=0,
     region_name=AWS_REGION,
+    rate_limiter=llm_rate_limiter,
 )
 
-
 MODEL_PROFILE = getattr(llm, "profile", None) or {}
-validate_model_profile(MODEL, MODEL_PROFILE)
+validate_model_profile(BEDROCK_MODEL_ID, MODEL_PROFILE)
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
@@ -281,7 +298,7 @@ def run_agent(history: list, max_iterations: int = 10) -> AgentRunResult:
         # No tool calls, the model produced its final answer
         if not response.tool_calls:
             return AgentRunResult(
-                response=response.content,
+                response=read_response_text(response),
                 prediction_id=prediction_id,
                 annotated_image=annotated_image,
                 tokens_used=tokens_used,
