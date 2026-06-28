@@ -46,6 +46,7 @@ ALLOWED_BEDROCK_MODEL_IDS = {
     "openai.gpt-oss-20b-1:0",
     "meta.llama3-1-8b-instruct-v1:0",
     "mistral.mistral-7b-instruct-v0:2",
+}
 MODEL = os.environ.get("MODEL")
 
 LLM_REQUESTS_PER_SECOND = 0.25  # 15 request per minute
