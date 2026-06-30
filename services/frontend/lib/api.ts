@@ -2,7 +2,19 @@ import type { ChatMessage, ChatResponse } from "./types";
 
 const AGENT_URL = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:8000";
 
-function getErrorMessage(body: unknown, fallback: string): string {
+function getFallbackErrorMessage(status: number, statusText: string): string {
+  if (status >= 500) {
+    return "The agent service is temporarily unavailable. Please try again later.";
+  }
+
+  return statusText || "Something went wrong. Please try again.";
+}
+
+function getErrorMessage(body: unknown, fallback: string, status: number): string {
+  if (status >= 500) {
+    return fallback;
+  }
+
   if (body && typeof body === "object" && "detail" in body) {
     const detail = (body as { detail?: unknown }).detail;
 
@@ -39,16 +51,20 @@ export async function sendMessage(messages: ChatMessage[]): Promise<ChatResponse
     body: JSON.stringify({ messages: requestMessages }),
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    let message = text || res.statusText;
+    const fallbackMessage = getFallbackErrorMessage(res.status, res.statusText);
+    const text = await res.text().catch(() => "");
+    let message = fallbackMessage;
 
     try {
-      message = getErrorMessage(JSON.parse(text), message);
+      message = getErrorMessage(JSON.parse(text), message, res.status);
     } catch {
-      // Non-JSON errors can still be shown as plain text.
+      // Keep the fallback for non-JSON errors.
     }
 
-    if (res.status === 429 && (!message || message === res.statusText)) {
+    if (
+      res.status === 429 &&
+      (!message || message === res.statusText || message === fallbackMessage)
+    ) {
       const retryAfter = res.headers.get("Retry-After");
       message = retryAfter
         ? `Rate limit reached. Please try again in ${retryAfter} seconds.`

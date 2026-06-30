@@ -1,6 +1,8 @@
 import base64
 import json
 
+import pytest
+from fastapi import HTTPException
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 
@@ -166,6 +168,29 @@ def test_detect_objects_sends_s3_key_to_yolo(agent_module, monkeypatch):
         "time_took": 0.2,
         "predicted_image_s3_key": "chats/chat-123/image-123/predicted/image.jpg",
     }
+
+
+def test_upload_image_without_bucket_returns_client_safe_error(agent_module, monkeypatch):
+    monkeypatch.setattr(agent_module, "AWS_S3_BUCKET", None)
+
+    with pytest.raises(HTTPException) as exc:
+        agent_module.upload_image_base64_to_s3("unused-image-data", "chat-123")
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail == "Image upload is currently unavailable"
+
+
+def test_upload_image_with_invalid_data_returns_client_safe_error(
+    agent_module,
+    monkeypatch,
+):
+    monkeypatch.setattr(agent_module, "AWS_S3_BUCKET", "polyai-images")
+
+    with pytest.raises(HTTPException) as exc:
+        agent_module.upload_image_base64_to_s3("not-base64", "chat-123")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Invalid image data"
 
 
 def test_fetch_s3_image_returns_base64_for_frontend(agent_module, monkeypatch):

@@ -7,6 +7,8 @@ import { sendMessage } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 import MessageBubble from "./message-bubble";
 
+const SUPPORTED_IMAGE_TYPES = ["image/jpeg", "image/png"];
+
 export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -25,6 +27,15 @@ export default function Chat() {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+      setImageB64(null);
+      setImagePreview(null);
+      toast.error("Please choose a JPEG or PNG image.");
+      e.target.value = "";
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
@@ -142,7 +153,7 @@ export default function Chat() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png"
             className="hidden"
             onChange={handleFileChange}
           />
