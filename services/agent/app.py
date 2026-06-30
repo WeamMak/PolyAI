@@ -120,12 +120,16 @@ def read_image_type(image_bytes: bytes):
 
 def upload_image_base64_to_s3(image_b64: str, chat_id: str) -> str:
     if not AWS_S3_BUCKET:
-        raise HTTPException(status_code=500, detail="AWS_S3_BUCKET is not configured")
+        logging.error("AWS_S3_BUCKET is not configured")
+        raise HTTPException(
+            status_code=500,
+            detail="Image upload is currently unavailable",
+        )
 
     try:
         image_bytes = base64.b64decode(image_b64.strip(), validate=True)
     except (binascii.Error, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid image_base64 value")
+        raise HTTPException(status_code=400, detail="Invalid image data")
 
     ext, content_type = read_image_type(image_bytes)
     image_id = str(uuid.uuid4())
@@ -140,7 +144,10 @@ def upload_image_base64_to_s3(image_b64: str, chat_id: str) -> str:
         )
     except (BotoCoreError, ClientError):
         logging.exception("Could not upload image to S3")
-        raise HTTPException(status_code=502, detail="Could not upload image to S3")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not upload image. Please try again later.",
+        )
 
     return image_s3_key
 
