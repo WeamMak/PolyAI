@@ -12,6 +12,7 @@ langchain-aws
 
 httpx
 pydantic
+boto3
 
 # Testing
 pytest==7.4.0

@@ -21,10 +21,17 @@ def test_health_endpoint(agent_module):
 
 def test_chat_endpoint_uses_mocked_agent_loop(agent_module, monkeypatch):
     captured = {}
+    uploaded = {}
+    image_s3_key = "chats/chat-123/image-123/original/image.jpg"
+
+    def fake_upload_image_base64_to_s3(image_base64, chat_id):
+        uploaded["image_base64"] = image_base64
+        uploaded["chat_id"] = chat_id
+        return image_s3_key
 
     def fake_run_agent(history):
         captured["history"] = history
-        captured["image_base64"] = agent_module._current_image_b64.get()
+        captured["image_s3_key"] = agent_module._current_image_s3_key.get()
         return agent_module.AgentRunResult(
             response="I found one person.",
             prediction_id="prediction-123",
@@ -34,6 +41,11 @@ def test_chat_endpoint_uses_mocked_agent_loop(agent_module, monkeypatch):
             context_limit_exceeded=False,
         )
 
+    monkeypatch.setattr(
+        agent_module,
+        "upload_image_base64_to_s3",
+        fake_upload_image_base64_to_s3,
+    )
     monkeypatch.setattr(agent_module, "run_agent", fake_run_agent)
 
     if hasattr(agent_module, "check_chat_rate_limit"):
@@ -67,9 +79,11 @@ def test_chat_endpoint_uses_mocked_agent_loop(agent_module, monkeypatch):
     assert data["context_limit_exceeded"] is False
     assert isinstance(data["agent_loop_time_s"], float)
 
-    assert captured["image_base64"] == "raw-image-b64"
+    assert uploaded["image_base64"] == "raw-image-b64"
+    assert uploaded["chat_id"]
+    assert captured["image_s3_key"] == image_s3_key
     assert isinstance(captured["history"][0], HumanMessage)
     assert isinstance(captured["history"][1], AIMessage)
     assert "raw-image-b64" not in captured["history"][0].content
     assert "[An image was uploaded." in captured["history"][0].content
-    assert agent_module._current_image_b64.get() is None
+    assert agent_module._current_image_s3_key.get() is None

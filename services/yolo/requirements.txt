@@ -2,6 +2,7 @@
 fastapi>=0.95.0
 uvicorn>=0.21.1
 httpx>=0.28.1
+python-dotenv
 
 # Pillow for image handling
 pillow>=9.5.0
@@ -19,6 +20,9 @@ prometheus-fastapi-instrumentator>=6.0.0
 # Database
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.9
+
+# AWS
+boto3
 
 # Testing
 pytest==7.4.0

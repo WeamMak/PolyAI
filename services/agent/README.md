@@ -20,7 +20,7 @@ Configure environment:
 
 ```bash
 cp .env.example .env
-# Edit .env if you want to change the Bedrock model or YOLO URL
+# Edit .env to set your S3 bucket, Bedrock model, or YOLO URL
 ```
 
 The agent uses Amazon Bedrock through the AWS SDK. Configure AWS credentials
@@ -31,8 +31,21 @@ with `aws configure`; do not copy AWS keys into `.env` or the source code.
 | Variable | Default | Description |
 |---|---|---|
 | `MODEL` | `bedrock/amazon.nova-lite-v1:0` | Bedrock model used by the agent |
-| `AWS_REGION` | `us-east-1` | AWS region for Bedrock |
+| `AWS_REGION` | `us-east-1` | AWS region for Bedrock and S3 |
+| `AWS_S3_BUCKET` | required | S3 bucket used to store uploaded images |
 | `YOLO_SERVICE_URL` | `http://localhost:8080` | URL of the YOLO microservice |
+
+## Image Flow
+
+The Agent and YOLO service exchange JSON only.
+
+1. The frontend sends the user's image to the Agent as base64.
+1. The Agent uploads the original image to S3.
+1. The Agent sends YOLO only the original `image_s3_key`.
+1. YOLO downloads the original image from S3, runs prediction, uploads the predicted image to S3, and returns `predicted_image_s3_key`.
+1. The Agent reads the predicted image from S3 and returns it to the frontend as `annotated_image` base64.
+
+The Agent does not send image bytes to YOLO, and it does not fetch predicted image bytes from YOLO.
 
 Allowed Bedrock models:
 
@@ -102,11 +115,17 @@ Response:
 ```json
 {
   "response": "string",
+  "prediction_id": "string or null",
+  "annotated_image": "base64-encoded annotated JPEG or null",
   "tokens_used": {
     "input": 312,
     "output": 22,
     "total": 334
-  }
+  },
+  "agent_loop_time_s": 1.23,
+  "iterations": 2,
+  "tools_called": ["detect_objects"],
+  "context_limit_exceeded": false
 }
 ```
 
