@@ -1,7 +1,5 @@
 FROM python:3.12-slim-trixie AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
 ENV VIRTUAL_ENV=/opt/venv
 
 RUN python -m venv "$VIRTUAL_ENV"
@@ -9,9 +7,8 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /build
 
-COPY torch-requirements.txt requirements.txt ./
+COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r torch-requirements.txt \
     && pip install --no-cache-dir -r requirements.txt \
     && rm -rf "$VIRTUAL_ENV"/bin/pip* \
     && rm -rf "$VIRTUAL_ENV"/lib/python*/site-packages/pip*
@@ -25,16 +22,12 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /app
 
-# Install runtime system dependencies
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 \
-    && rm -rf /usr/local/lib/python*/site-packages/pip*
-
 COPY --from=builder /opt/venv /opt/venv
-COPY . .
+COPY app.py .
 
-EXPOSE 8080
+ENV YOLO_SERVICE_URL=http://yolo:8080
+ENV AWS_REGION=us-east-1
+
+EXPOSE 8000
 
 CMD ["python", "app.py"]
