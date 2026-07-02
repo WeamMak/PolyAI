@@ -1,0 +1,84 @@
+services:
+  frontend:
+    image: weammakhoul/frontend-service:0.0.1
+    build:
+      context: ./services/frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_AGENT_URL: http://localhost:8000
+    depends_on:
+      - agent
+    networks:
+      - polyai-net
+
+  agent:
+    image: weammakhoul/agent-service:0.0.1
+    build:
+      context: ./services/agent
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./services/agent/.env
+    environment:
+      YOLO_SERVICE_URL: http://yolo:8080
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro
+    depends_on:
+      - yolo
+    networks:
+      - polyai-net
+
+  yolo:
+    image: weammakhoul/yolo-service:0.0.1
+    build:
+      context: ./services/yolo
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./services/yolo/.env
+    environment:
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro
+    networks:
+      - polyai-net
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - yolo
+    networks:
+      - monitoring-net
+      - polyai-net
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring-net
+
+networks:
+  polyai-net:
+    name: polyai-net
+    driver: bridge
+  monitoring-net:
+    name: monitoring-net
+    driver: bridge
+
+volumes:
+  grafana-data:
+    name: grafana-data
+  prometheus-data:
+    name: prometheus-data
