@@ -1,10 +1,6 @@
 services:
   frontend:
-    image: weammakhoul/frontend-service:0.0.1
-    build:
-      context: ./services/frontend
-      args:
-        NEXT_PUBLIC_AGENT_URL: ${NEXT_PUBLIC_AGENT_URL:-http://localhost:8000}
+    image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/frontend-service:${FRONTEND_IMAGE_TAG:-0.0.1}
     ports:
       - "3000:3000"
     environment:
@@ -15,9 +11,7 @@ services:
       - polyai-net
 
   agent:
-    image: weammakhoul/agent-service:0.0.1
-    build:
-      context: ./services/agent
+    image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/agent-service:${AGENT_IMAGE_TAG:-0.0.1}
     ports:
       - "8000:8000"
     env_file:
@@ -30,9 +24,7 @@ services:
       - polyai-net
 
   yolo:
-    image: weammakhoul/yolo-service:0.0.1
-    build:
-      context: ./services/yolo
+    image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/yolo-service:${YOLO_IMAGE_TAG:-0.0.1}
     ports:
       - "8080:8080"
     env_file:

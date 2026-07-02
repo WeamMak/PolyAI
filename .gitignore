@@ -53,3 +53,4 @@ services/yolo/coverage.xml
 .agents/skills/*/reports/*
 !.agents/skills/*/reports/.gitkeep
 docker-compose.override.yml
+docker-compose.override.yaml
