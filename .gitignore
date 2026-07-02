@@ -52,3 +52,4 @@ services/yolo/coverage.xml
 # Skill eval reports
 .agents/skills/*/reports/*
 !.agents/skills/*/reports/.gitkeep
+docker-compose.override.yml

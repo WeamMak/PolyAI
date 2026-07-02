@@ -3,10 +3,12 @@ services:
     image: weammakhoul/frontend-service:0.0.1
     build:
       context: ./services/frontend
+      args:
+        NEXT_PUBLIC_AGENT_URL: ${NEXT_PUBLIC_AGENT_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_AGENT_URL: http://localhost:8000
+      NEXT_PUBLIC_AGENT_URL: ${NEXT_PUBLIC_AGENT_URL:-http://localhost:8000}
     depends_on:
       - agent
     networks:
@@ -22,9 +24,6 @@ services:
       - ./services/agent/.env
     environment:
       YOLO_SERVICE_URL: http://yolo:8080
-      AWS_PROFILE: ${AWS_PROFILE:-default}
-    volumes:
-      - ${HOME}/.aws:/root/.aws:ro
     depends_on:
       - yolo
     networks:
@@ -38,10 +37,6 @@ services:
       - "8080:8080"
     env_file:
       - ./services/yolo/.env
-    environment:
-      AWS_PROFILE: ${AWS_PROFILE:-default}
-    volumes:
-      - ${HOME}/.aws:/root/.aws:ro
     networks:
       - polyai-net
 
