@@ -1,6 +1,7 @@
 services:
   frontend:
     image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/frontend-service:${FRONTEND_IMAGE_TAG:-0.0.1}
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -12,6 +13,7 @@ services:
 
   agent:
     image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/agent-service:${AGENT_IMAGE_TAG:-0.0.1}
+    restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
@@ -25,6 +27,7 @@ services:
 
   yolo:
     image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/yolo-service:${YOLO_IMAGE_TAG:-0.0.1}
+    restart: unless-stopped
     ports:
       - "8080:8080"
     env_file:
@@ -34,6 +37,7 @@ services:
 
   prometheus:
     image: prom/prometheus
+    restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
@@ -47,6 +51,7 @@ services:
 
   grafana:
     image: grafana/grafana
+    restart: unless-stopped
     ports:
       - "3001:3000"
     volumes:
