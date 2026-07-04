@@ -9,6 +9,7 @@ services/
   agent/    <- LangChain agent with manual tool-calling loop
   frontend/ <- Simple chat UI (talks to the agent)
   yolo/     <- YOLO object-detection microservice (FastAPI + Ultralytics)
+  img-proc-mcp/ <- MCP image-processing tools (FastMCP + Pillow)
 ```
 
 ---
@@ -17,7 +18,7 @@ services/
 
 The project is deployed with Docker Compose, not Linux services.
 
-- `docker-compose.yml` is the committed stack definition for frontend, agent, yolo, Prometheus, and Grafana.
+- `docker-compose.yml` is the committed stack definition for frontend, agent, yolo, img-proc-mcp, Prometheus, and Grafana.
 - `docker-compose.override.yml` is local-only and ignored by git. It may build local images and mount `~/.aws` read-only for local AWS credentials.
 - EC2 should not build images. GitHub Actions builds changed service images, pushes them to Docker Hub with unique tags, then EC2 runs `docker compose pull` and `docker compose up -d --no-build`.
 - Do not add systemd/Linux-service deployment steps back into the GitHub Actions workflow.
@@ -34,6 +35,7 @@ Runtime environment ownership:
 Networking rules:
 
 - The agent must call YOLO with `YOLO_SERVICE_URL=http://yolo:8080` in Docker Compose.
+- The agent must call the image-processing MCP service with `IMG_PROC_MCP_URL=http://img-proc-mcp:8090` in Docker Compose.
 - Prometheus scrapes YOLO with target `yolo:8080`.
 - Grafana connects to Prometheus with `http://prometheus:9090`.
 - The browser-facing frontend uses `NEXT_PUBLIC_AGENT_URL`, such as `http://localhost:8000`, `http://dev.weam.fursa.click:8000`, or `http://prod.weam.fursa.click:8000`.

@@ -1,12 +1,38 @@
 import base64
 import io
+import os
 import random
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from PIL import Image, ImageFilter
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 
-mcp = FastMCP("img-proc")
+MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.environ.get("MCP_PORT", "8090"))
+MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+
+mcp = FastMCP(
+    "img-proc",
+    host=MCP_HOST,
+    port=MCP_PORT,
+    json_response=True,
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=[
+            "127.0.0.1:*",
+            "localhost:*",
+            "img-proc-mcp:*",
+        ],
+        allowed_origins=[
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://img-proc-mcp:*",
+        ],
+    ),
+)
 
 
 def _decode(image_b64: str) -> Image.Image:
@@ -132,5 +158,37 @@ def add_noise(image_b64: str, amount: float = 0.02, salt_vs_pepper: float = 0.5)
     return _encode(noisy_img)
 
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
+@mcp.custom_route("/tools/call", methods=["POST"])
+async def call_tool(request: Request) -> JSONResponse:
+    """
+    Small HTTP bridge for the agent service.
+
+    The real MCP tools are still registered above. This route lets the FastAPI
+    agent call those tools without adding the MCP Python SDK to the agent
+    runtime, where it currently conflicts with the existing FastAPI version.
+    """
+    body = await request.json()
+    tool_name = body.get("name")
+    arguments = body.get("arguments", {})
+
+    if not isinstance(tool_name, str):
+        return JSONResponse({"error": "name must be a string"}, status_code=400)
+
+    if not isinstance(arguments, dict):
+        return JSONResponse({"error": "arguments must be an object"}, status_code=400)
+
+    try:
+        result = await mcp.call_tool(tool_name, arguments)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    return JSONResponse({"result": result[1]["result"]})
+
+
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport=MCP_TRANSPORT)

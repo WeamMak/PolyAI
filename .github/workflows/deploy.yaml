@@ -19,6 +19,7 @@ jobs:
       yolo: ${{ steps.detect.outputs.yolo }}
       agent: ${{ steps.detect.outputs.agent }}
       frontend: ${{ steps.detect.outputs.frontend }}
+      img_proc_mcp: ${{ steps.detect.outputs.img_proc_mcp }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,6 +41,7 @@ jobs:
           yolo=false
           agent=false
           frontend=false
+          img_proc_mcp=false
           stack=false
 
           while IFS= read -r file; do
@@ -53,6 +55,9 @@ jobs:
               services/frontend/*)
                 frontend=true
                 ;;
+              services/img-proc-mcp/*)
+                img_proc_mcp=true
+                ;;
               docker-compose.yml|docker-compose.yaml|prometheus.yml|.github/workflows/deploy.yaml)
                 stack=true
                 ;;
@@ -63,10 +68,11 @@ jobs:
             yolo=true
             agent=true
             frontend=true
+            img_proc_mcp=true
           fi
 
           any=false
-          if [ "$yolo" = "true" ] || [ "$agent" = "true" ] || [ "$frontend" = "true" ] || [ "$stack" = "true" ]; then
+          if [ "$yolo" = "true" ] || [ "$agent" = "true" ] || [ "$frontend" = "true" ] || [ "$img_proc_mcp" = "true" ] || [ "$stack" = "true" ]; then
             any=true
           fi
 
@@ -75,6 +81,7 @@ jobs:
             echo "yolo=$yolo"
             echo "agent=$agent"
             echo "frontend=$frontend"
+            echo "img_proc_mcp=$img_proc_mcp"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -129,6 +136,14 @@ jobs:
           tags: ${{ env.DOCKERHUB_NAMESPACE }}/frontend-service:${{ env.IMAGE_TAG }}
           build-args: |
             NEXT_PUBLIC_AGENT_URL=${{ steps.deploy-env.outputs.agent_url }}
+
+      - name: Build and push image processing MCP image
+        if: needs.changes.outputs.img_proc_mcp == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/img-proc-mcp
+          push: true
+          tags: ${{ env.DOCKERHUB_NAMESPACE }}/img-proc-mcp-service:${{ env.IMAGE_TAG }}
 
   deploy-dev:
     runs-on: ubuntu-latest
@@ -187,6 +202,10 @@ jobs:
 
             if [ "${{ needs.changes.outputs.frontend }}" = "true" ]; then
               set_env FRONTEND_IMAGE_TAG "${{ env.IMAGE_TAG }}"
+            fi
+
+            if [ "${{ needs.changes.outputs.img_proc_mcp }}" = "true" ]; then
+              set_env IMG_PROC_MCP_IMAGE_TAG "${{ env.IMAGE_TAG }}"
             fi
 
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
@@ -252,6 +271,10 @@ jobs:
 
             if [ "${{ needs.changes.outputs.frontend }}" = "true" ]; then
               set_env FRONTEND_IMAGE_TAG "${{ env.IMAGE_TAG }}"
+            fi
+
+            if [ "${{ needs.changes.outputs.img_proc_mcp }}" = "true" ]; then
+              set_env IMG_PROC_MCP_IMAGE_TAG "${{ env.IMAGE_TAG }}"
             fi
 
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin

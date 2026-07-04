@@ -18,6 +18,12 @@ pip install -r requirements.txt
 mcp dev app.py
 ```
 
+To run the HTTP service that the agent uses:
+
+```bash
+MCP_TRANSPORT=streamable-http MCP_HOST=0.0.0.0 MCP_PORT=8090 python app.py
+```
+
 ## Test The Tools
 
 From this directory:

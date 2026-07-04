@@ -49,3 +49,20 @@ jobs:
 
       - name: Run agent tests
         run: pytest services/agent/tests
+
+  img-proc-mcp-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r services/img-proc-mcp/requirements.txt
+
+      - name: Run image-processing MCP tests
+        run: pytest services/img-proc-mcp/tests/test_app.py
