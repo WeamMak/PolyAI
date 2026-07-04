@@ -28,6 +28,12 @@ python app.py
 
 The service will be available at http://<your_server_ip>:8080
 
+When running with the root Docker Compose stack, the agent reaches this service at:
+
+```text
+http://yolo:8080
+```
+
 You can test the api endpoints using `curl` or Postman. See the API Endpoints section below for details on available endpoints and how to use them.
 
 ## Environment Variables
