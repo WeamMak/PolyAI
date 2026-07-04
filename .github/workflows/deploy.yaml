@@ -1,85 +1,261 @@
-name: Deploy PolyAI
+name: Deploy PolyAI Stack
 
 on:
   push:
     branches:
-      - main
       - dev
+      - main
+
+env:
+  DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}
+  IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
+  STACK_DIR: ${{ vars.STACK_DIR || '/home/ubuntu/PolyAI' }}
 
 jobs:
-  deploy-dev:
-    if: github.ref == 'refs/heads/dev'
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      any: ${{ steps.detect.outputs.any }}
+      yolo: ${{ steps.detect.outputs.yolo }}
+      agent: ${{ steps.detect.outputs.agent }}
+      frontend: ${{ steps.detect.outputs.frontend }}
     steps:
-      - name: Deploy to Dev instance
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed services
+        id: detect
+        shell: bash
+        run: |
+          before="${{ github.event.before }}"
+
+          if [ "$before" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$before^{commit}" 2>/dev/null; then
+            changed_files="$(git show --name-only --pretty="" "$GITHUB_SHA")"
+          else
+            changed_files="$(git diff --name-only "$before" "$GITHUB_SHA")"
+          fi
+
+          yolo=false
+          agent=false
+          frontend=false
+          stack=false
+
+          while IFS= read -r file; do
+            case "$file" in
+              services/yolo/*)
+                yolo=true
+                ;;
+              services/agent/*)
+                agent=true
+                ;;
+              services/frontend/*)
+                frontend=true
+                ;;
+              docker-compose.yml|docker-compose.yaml|prometheus.yml|.github/workflows/deploy.yaml)
+                stack=true
+                ;;
+            esac
+          done <<< "$changed_files"
+
+          if [ "$stack" = "true" ]; then
+            yolo=true
+            agent=true
+            frontend=true
+          fi
+
+          any=false
+          if [ "$yolo" = "true" ] || [ "$agent" = "true" ] || [ "$frontend" = "true" ] || [ "$stack" = "true" ]; then
+            any=true
+          fi
+
+          {
+            echo "any=$any"
+            echo "yolo=$yolo"
+            echo "agent=$agent"
+            echo "frontend=$frontend"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select deployment environment
+        id: deploy-env
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            echo "agent_url=${{ vars.PROD_NEXT_PUBLIC_AGENT_URL || 'http://prod.weam.fursa.click:8000' }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent_url=${{ vars.DEV_NEXT_PUBLIC_AGENT_URL || 'http://dev.weam.fursa.click:8000' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push YOLO image
+        if: needs.changes.outputs.yolo == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/yolo
+          push: true
+          tags: ${{ env.DOCKERHUB_NAMESPACE }}/yolo-service:${{ env.IMAGE_TAG }}
+
+      - name: Build and push agent image
+        if: needs.changes.outputs.agent == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/agent
+          push: true
+          tags: ${{ env.DOCKERHUB_NAMESPACE }}/agent-service:${{ env.IMAGE_TAG }}
+
+      - name: Build and push frontend image
+        if: needs.changes.outputs.frontend == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/frontend
+          push: true
+          tags: ${{ env.DOCKERHUB_NAMESPACE }}/frontend-service:${{ env.IMAGE_TAG }}
+          build-args: |
+            NEXT_PUBLIC_AGENT_URL=${{ steps.deploy-env.outputs.agent_url }}
+
+  deploy-dev:
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - build
+    if: github.ref == 'refs/heads/dev' && needs.changes.outputs.any == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare stack directory
+        uses: appleboy/ssh-action@v1
+        with:
+          host: dev.weam.fursa.click
+          username: ubuntu
+          key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
+          script: mkdir -p ${{ env.STACK_DIR }}
+
+      - name: Copy compose files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: dev.weam.fursa.click
+          username: ubuntu
+          key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
+          source: "docker-compose.yml,prometheus.yml"
+          target: ${{ env.STACK_DIR }}
+
+      - name: Deploy stack
         uses: appleboy/ssh-action@v1
         with:
           host: dev.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
           script: |
-            cd /home/ubuntu/PolyAI
-            git fetch origin
-            git reset --hard origin/dev
+            cd ${{ env.STACK_DIR }}
+            touch .env
 
-            if [ ! -d "/home/ubuntu/PolyAI/.venv" ]; then
-              python3 -m venv /home/ubuntu/PolyAI/.venv
+            set_env() {
+              key="$1"
+              value="$2"
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${value}|" .env
+              else
+                printf '%s=%s\n' "$key" "$value" >> .env
+              fi
+            }
+
+            if [ "${{ needs.changes.outputs.yolo }}" = "true" ]; then
+              set_env YOLO_IMAGE_TAG "${{ env.IMAGE_TAG }}"
             fi
 
-              /home/ubuntu/PolyAI/.venv/bin/python -m pip install --upgrade pip
-              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/yolo/torch-requirements.txt
-              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/yolo/requirements.txt
-              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/agent/requirements.txt
+            if [ "${{ needs.changes.outputs.agent }}" = "true" ]; then
+              set_env AGENT_IMAGE_TAG "${{ env.IMAGE_TAG }}"
+            fi
 
+            if [ "${{ needs.changes.outputs.frontend }}" = "true" ]; then
+              set_env FRONTEND_IMAGE_TAG "${{ env.IMAGE_TAG }}"
+            fi
 
-            cd /home/ubuntu/PolyAI/services/frontend
-            npm ci
-            npm run build
-
-            sudo systemctl daemon-reload
-            sudo systemctl restart yolo.service
-            sudo systemctl restart agent.service
-            sudo systemctl restart frontend.service
-
-            sudo systemctl status yolo.service --no-pager
-            sudo systemctl status agent.service --no-pager
-            sudo systemctl status frontend.service --no-pager
-
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            docker compose pull
+            docker compose up -d --no-build
+            docker image prune -f
+            docker compose ps
 
   deploy-prod:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    needs:
+      - changes
+      - build
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.any == 'true'
     steps:
-      - name: Deploy to Prod instance
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare stack directory
+        uses: appleboy/ssh-action@v1
+        with:
+          host: prod.weam.fursa.click
+          username: ubuntu
+          key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
+          script: mkdir -p ${{ env.STACK_DIR }}
+
+      - name: Copy compose files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: prod.weam.fursa.click
+          username: ubuntu
+          key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
+          source: "docker-compose.yml,prometheus.yml"
+          target: ${{ env.STACK_DIR }}
+
+      - name: Deploy stack
         uses: appleboy/ssh-action@v1
         with:
           host: prod.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
           script: |
-            cd /home/ubuntu/PolyAI
-            git fetch origin
-            git reset --hard origin/main
+            cd ${{ env.STACK_DIR }}
+            touch .env
 
-            if [ ! -d "/home/ubuntu/PolyAI/.venv" ]; then
-              python3 -m venv /home/ubuntu/PolyAI/.venv
+            set_env() {
+              key="$1"
+              value="$2"
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${value}|" .env
+              else
+                printf '%s=%s\n' "$key" "$value" >> .env
+              fi
+            }
+
+            if [ "${{ needs.changes.outputs.yolo }}" = "true" ]; then
+              set_env YOLO_IMAGE_TAG "${{ env.IMAGE_TAG }}"
             fi
 
-              /home/ubuntu/PolyAI/.venv/bin/python -m pip install --upgrade pip
-              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/yolo/torch-requirements.txt
-              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/yolo/requirements.txt
-              /home/ubuntu/PolyAI/.venv/bin/python -m pip install -r /home/ubuntu/PolyAI/services/agent/requirements.txt
+            if [ "${{ needs.changes.outputs.agent }}" = "true" ]; then
+              set_env AGENT_IMAGE_TAG "${{ env.IMAGE_TAG }}"
+            fi
 
+            if [ "${{ needs.changes.outputs.frontend }}" = "true" ]; then
+              set_env FRONTEND_IMAGE_TAG "${{ env.IMAGE_TAG }}"
+            fi
 
-            cd /home/ubuntu/PolyAI/services/frontend
-            npm ci
-            npm run build
-
-            sudo systemctl daemon-reload
-            sudo systemctl restart yolo.service
-            sudo systemctl restart agent.service
-            sudo systemctl restart frontend.service
-
-            sudo systemctl status yolo.service --no-pager
-            sudo systemctl status agent.service --no-pager
-            sudo systemctl status frontend.service --no-pager
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            docker compose pull
+            docker compose up -d --no-build
+            docker image prune -f
+            docker compose ps
