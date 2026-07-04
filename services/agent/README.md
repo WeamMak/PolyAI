@@ -33,7 +33,7 @@ with `aws configure`; do not copy AWS keys into `.env` or the source code.
 | `MODEL` | `bedrock/openai.gpt-oss-20b-1:0` | Bedrock model used by the agent |
 | `AWS_REGION` | `us-east-1` | AWS region for Bedrock and S3 |
 | `AWS_S3_BUCKET` | required | S3 bucket used to store uploaded images |
-| `YOLO_SERVICE_URL` | `http://localhost:8080` | URL of the YOLO microservice |
+| `YOLO_SERVICE_URL` | `http://localhost:8080` | URL of the YOLO microservice for standalone local runs. Docker Compose overrides this to `http://yolo:8080`. |
 
 ## Image Flow
 
@@ -85,13 +85,13 @@ Expected response:
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Hello! What can you do?"}'
+  -d '{"messages": [{"role": "user", "content": "Hello! What can you do?"}]}'
 ```
 
 ### Send a message with an image
 
 ```bash
-echo "{\"message\": \"What objects are in this image?\", \"image_base64\": \"$(base64 -w0 beatles.jpeg)\"}" \
+echo "{\"messages\": [{\"role\": \"user\", \"content\": \"What objects are in this image?\", \"image_base64\": \"$(base64 -w0 beatles.jpeg)\"}]}" \
   | curl -X POST http://localhost:8000/chat \
          -H "Content-Type: application/json" \
          -d @-
@@ -105,8 +105,13 @@ Request body:
 
 ```json
 {
-  "message": "string (optional, defaults to 'What's in this image?')",
-  "image_base64": "string (optional, base64-encoded JPEG or PNG)"
+  "messages": [
+    {
+      "role": "user",
+      "content": "What objects are in this image?",
+      "image_base64": "optional base64-encoded JPEG or PNG"
+    }
+  ]
 }
 ```
 
