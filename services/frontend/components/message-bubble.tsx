@@ -26,17 +26,24 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
           <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-li:my-0">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                img: () => null,
+              }}
+            >
               {message.content}
             </ReactMarkdown>
           </div>
         )}
         {!isUser && message.annotated_image && (
-          <img
-            src={`data:image/jpeg;base64,${message.annotated_image}`}
-            alt="annotated detection result"
-            className="mt-3 max-h-80 w-full rounded-lg border border-border/60 bg-background object-contain"
-          />
+          <div className="mt-3 flex justify-center rounded-lg border border-border/60 bg-background p-2">
+            <img
+              src={`data:image/png;base64,${message.annotated_image}`}
+              alt="image result"
+              className="h-auto max-h-80 w-auto max-w-full rounded-md object-contain"
+            />
+          </div>
         )}
       </div>
     </div>
