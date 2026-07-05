@@ -1,11 +1,12 @@
 # Vision Agent
 
-A LangChain-powered AI vision agent with a manual ReAct loop. Accepts text and base64-encoded images, and can call tools (e.g. YOLO object detection) to answer questions.
+A LangChain-powered AI vision agent with a manual ReAct loop. Accepts text and base64-encoded images, and can call tools for YOLO object detection and MCP image processing.
 
 ## Prerequisites
 
 - Python 3.10+
-- A running YOLO service (optional - only needed for `detect_objects`)
+- A running YOLO service (needed for object detection)
+- A running image-processing MCP service (needed for image transformations)
 
 
 ## Setup
@@ -20,7 +21,7 @@ Configure environment:
 
 ```bash
 cp .env.example .env
-# Edit .env to set your S3 bucket, Bedrock model, or YOLO URL
+# Edit .env to set your S3 bucket, Bedrock model, YOLO URL, or MCP URL
 ```
 
 The agent uses Amazon Bedrock through the AWS SDK. Configure AWS credentials
@@ -34,10 +35,11 @@ with `aws configure`; do not copy AWS keys into `.env` or the source code.
 | `AWS_REGION` | `us-east-1` | AWS region for Bedrock and S3 |
 | `AWS_S3_BUCKET` | required | S3 bucket used to store uploaded images |
 | `YOLO_SERVICE_URL` | `http://localhost:8080` | URL of the YOLO microservice for standalone local runs. Docker Compose overrides this to `http://yolo:8080`. |
+| `IMG_PROC_MCP_URL` | `http://localhost:8090` | URL of the image-processing MCP service for standalone local runs. Docker Compose overrides this to `http://img-proc-mcp:8090`. |
 
 ## Image Flow
 
-The Agent and YOLO service exchange JSON only.
+The Agent, YOLO service, and image-processing MCP service exchange JSON only.
 
 1. The frontend sends the user's image to the Agent as base64.
 1. The Agent uploads the original image to S3.
@@ -46,6 +48,15 @@ The Agent and YOLO service exchange JSON only.
 1. The Agent reads the predicted image from S3 and returns it to the frontend as `annotated_image` base64.
 
 The Agent does not send image bytes to YOLO, and it does not fetch predicted image bytes from YOLO.
+
+For image-processing prompts:
+
+1. The Agent downloads the original image from S3 inside the tool implementation.
+1. For whole-image operations, it sends the full image as base64 to the MCP service.
+1. For object-specific operations, it asks YOLO for bounding boxes, crops only the selected object region, sends that crop to the MCP service, and pastes the processed crop back into the full image.
+1. The Agent uploads the processed PNG to S3 and returns that image to the frontend as `annotated_image` base64.
+
+The LLM still receives text-only tool results. Image bytes are never added to LangChain messages.
 
 Allowed Bedrock models:
 
@@ -121,7 +132,7 @@ Response:
 {
   "response": "string",
   "prediction_id": "string or null",
-  "annotated_image": "base64-encoded annotated JPEG or null",
+  "annotated_image": "base64-encoded annotated or processed image, or null",
   "tokens_used": {
     "input": 312,
     "output": 22,
@@ -129,7 +140,7 @@ Response:
   },
   "agent_loop_time_s": 1.23,
   "iterations": 2,
-  "tools_called": ["detect_objects"],
+  "tools_called": ["detect_objects", "process_image"],
   "context_limit_exceeded": false
 }
 ```
