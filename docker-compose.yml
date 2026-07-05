@@ -49,16 +49,30 @@ services:
     networks:
       - polyai-net
 
+  node-exporter:
+    image: prom/node-exporter:v1.10.2
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.processes"
+    volumes:
+      - "/:/host:ro,rslave"
+
   prometheus:
     image: prom/prometheus
     restart: unless-stopped
     ports:
       - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - prometheus-data:/prometheus
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
       - yolo
+      - node-exporter
     networks:
       - monitoring-net
       - polyai-net
