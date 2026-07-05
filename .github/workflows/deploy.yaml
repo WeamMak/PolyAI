@@ -211,7 +211,8 @@ jobs:
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
             docker compose pull
             docker compose up -d --no-build
-            docker image prune -f
+            docker image prune -af
+            docker builder prune -af
             docker compose ps
 
   deploy-prod:
