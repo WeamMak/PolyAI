@@ -77,6 +77,7 @@ SYSTEM_PROMPT = (
     "When the user asks to transform an image, call process_image. "
     "Supported image operations are rotate, flip, blur, resize, crop, and add_noise. "
     "Use add_noise for salt-and-pepper noise requests. "
+    "Do not include markdown image placeholders; the frontend displays returned images separately. "
     "For object-specific requests like 'the second dog from the right', pass "
     "target='object', the object label, ordinal number, and from_side. "
     "Never ask the model to inspect image bytes directly; use tools instead. "
