@@ -37,12 +37,14 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
           </div>
         )}
         {!isUser && message.annotated_image && (
-          <div className="mt-3 flex justify-center rounded-lg border border-border/60 bg-background p-2">
-            <img
-              src={`data:image/png;base64,${message.annotated_image}`}
-              alt="image result"
-              className="h-auto max-h-80 w-auto max-w-full rounded-md object-contain"
-            />
+          <div className="mt-3 flex justify-start">
+            <div className="inline-flex max-w-full rounded-lg border border-border/60 bg-background p-2">
+              <img
+                src={`data:image/png;base64,${message.annotated_image}`}
+                alt="image result"
+                className="h-auto max-h-80 w-auto max-w-full rounded-md object-contain"
+              />
+            </div>
           </div>
         )}
       </div>
