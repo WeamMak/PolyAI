@@ -348,6 +348,148 @@ def test_process_image_blurs_second_dog_from_right(agent_module, monkeypatch):
     assert called == {"tool_name": "blur", "crop_size": (10, 20), "radius": 5}
 
 
+def test_process_image_edits_combines_multiple_object_edits(agent_module, monkeypatch):
+    image_s3_key = "chats/chat-123/image-123/original/image.png"
+    calls = []
+    prediction_calls = []
+    uploaded = {}
+
+    monkeypatch.setattr(
+        agent_module,
+        "read_s3_image_bytes",
+        lambda key: make_png_bytes(size=(100, 50), color="white"),
+    )
+
+    def fake_request_yolo_prediction(key):
+        prediction_calls.append(key)
+        return {"prediction_uid": "prediction-123"}
+
+    monkeypatch.setattr(
+        agent_module,
+        "request_yolo_prediction",
+        fake_request_yolo_prediction,
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "get_yolo_prediction_details",
+        lambda uid: {
+            "detection_objects": [
+                {
+                    "id": 1,
+                    "label": "person",
+                    "score": 0.9,
+                    "box": "[0, 0, 10, 20]",
+                },
+                {
+                    "id": 2,
+                    "label": "person",
+                    "score": 0.8,
+                    "box": "[80, 0, 90, 20]",
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "build_processed_image_s3_key",
+        lambda key, operation: f"chats/chat-123/image-123/processed/{operation}.png",
+    )
+
+    def fake_upload_image_bytes_to_s3(image_bytes, key, content_type):
+        uploaded["image_bytes"] = image_bytes
+        uploaded["key"] = key
+        uploaded["content_type"] = content_type
+
+    def fake_call_img_proc_mcp_tool(tool_name, arguments):
+        crop = Image.open(io.BytesIO(base64.b64decode(arguments["image_b64"])))
+        calls.append(
+            {
+                "tool_name": tool_name,
+                "crop_size": crop.size,
+                "direction": arguments.get("direction"),
+                "radius": arguments.get("radius"),
+            }
+        )
+
+        if tool_name == "flip":
+            return make_png_b64(size=crop.size, color="red")
+
+        if tool_name == "blur":
+            return make_png_b64(size=crop.size, color="blue")
+
+        raise AssertionError(f"unexpected tool call: {tool_name}")
+
+    monkeypatch.setattr(
+        agent_module,
+        "upload_image_bytes_to_s3",
+        fake_upload_image_bytes_to_s3,
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "call_img_proc_mcp_tool",
+        fake_call_img_proc_mcp_tool,
+    )
+
+    token = agent_module._current_image_s3_key.set(image_s3_key)
+    try:
+        result = agent_module.process_image_edits.invoke(
+            {
+                "edits": [
+                    {
+                        "operation": "flip",
+                        "target": "object",
+                        "label": "person",
+                        "ordinal": 1,
+                        "from_side": "left",
+                        "direction": "horizontal",
+                    },
+                    {
+                        "operation": "blur",
+                        "target": "object",
+                        "label": "person",
+                        "ordinal": 1,
+                        "from_side": "right",
+                        "radius": 5,
+                    },
+                ]
+            }
+        )
+    finally:
+        agent_module._current_image_s3_key.reset(token)
+
+    data = json.loads(result)
+    final_img = Image.open(io.BytesIO(uploaded["image_bytes"]))
+
+    assert data["operation"] == "multi_edit"
+    assert data["edit_count"] == 2
+    assert data["prediction_uid"] == "prediction-123"
+    assert (
+        data["processed_image_s3_key"]
+        == "chats/chat-123/image-123/processed/multi_edit.png"
+    )
+    assert data["edits"][0]["selected_object"]["id"] == 1
+    assert data["edits"][1]["selected_object"]["id"] == 2
+    assert prediction_calls == [image_s3_key]
+    assert calls == [
+        {
+            "tool_name": "flip",
+            "crop_size": (10, 20),
+            "direction": "horizontal",
+            "radius": None,
+        },
+        {
+            "tool_name": "blur",
+            "crop_size": (10, 20),
+            "direction": None,
+            "radius": 5.0,
+        },
+    ]
+    assert uploaded["key"] == "chats/chat-123/image-123/processed/multi_edit.png"
+    assert uploaded["content_type"] == "image/png"
+    assert final_img.getpixel((5, 10))[:3] == (255, 0, 0)
+    assert final_img.getpixel((85, 10))[:3] == (0, 0, 255)
+
+
 def test_upload_image_without_bucket_returns_client_safe_error(agent_module, monkeypatch):
     monkeypatch.setattr(agent_module, "AWS_S3_BUCKET", None)
 

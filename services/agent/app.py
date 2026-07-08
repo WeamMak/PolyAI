@@ -74,7 +74,9 @@ if BEDROCK_MODEL_ID not in ALLOWED_BEDROCK_MODEL_IDS:
 SYSTEM_PROMPT = (
     "You are an AI vision assistant. You help users understand and analyze images. "
     "Use the available tools to extract information from images. "
-    "When the user asks to transform an image, call process_image. "
+    "When the user asks for one image transform, call process_image. "
+    "When the user asks for two or more image transforms in one request, call "
+    "process_image_edits once with every edit in order. "
     "Supported image operations are rotate, flip, blur, resize, crop, and add_noise. "
     "Use add_noise for salt-and-pepper noise requests. "
     "Do not include markdown image placeholders; the frontend displays returned images separately. "
@@ -382,6 +384,169 @@ def call_image_operation(
     return call_img_proc_mcp_tool(operation, arguments)
 
 
+def read_edit_value(edit: dict, key: str, default):
+    value = edit.get(key, default)
+    if value is None:
+        return default
+    return value
+
+
+def read_optional_int_edit_value(edit: dict, key: str) -> Optional[int]:
+    value = read_edit_value(edit, key, None)
+    if value is None:
+        return None
+    return int(value)
+
+
+def read_bool_edit_value(edit: dict, key: str, default: bool) -> bool:
+    value = read_edit_value(edit, key, default)
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, str):
+        value_lower = value.strip().lower()
+        if value_lower in ["true", "1", "yes"]:
+            return True
+        if value_lower in ["false", "0", "no"]:
+            return False
+
+    return bool(value)
+
+
+def normalize_image_target(target: str) -> str:
+    normalized = target.strip().lower().replace("-", "_")
+
+    if normalized in ["entire_image", "image", "all"]:
+        return "entire_image"
+
+    if normalized in ["object", "region"]:
+        return "object"
+
+    raise ValueError("target must be 'entire_image' or 'object'")
+
+
+def normalize_image_edit(edit: dict, edit_number: int) -> dict:
+    if not isinstance(edit, dict):
+        raise ValueError(f"edit {edit_number} must be an object")
+
+    raw_operation = read_edit_value(edit, "operation", "")
+    if not isinstance(raw_operation, str) or not raw_operation.strip():
+        raise ValueError(f"edit {edit_number} requires an operation")
+
+    raw_label = read_edit_value(edit, "label", None)
+    label = str(raw_label) if raw_label is not None else None
+    target = normalize_image_target(
+        str(read_edit_value(edit, "target", "entire_image"))
+    )
+
+    if target == "object" and not label:
+        raise ValueError(f"edit {edit_number} object-specific edits require a label")
+
+    return {
+        "operation": normalize_operation(raw_operation),
+        "target": target,
+        "label": label,
+        "ordinal": int(read_edit_value(edit, "ordinal", 1)),
+        "from_side": str(read_edit_value(edit, "from_side", "left")),
+        "angle": float(read_edit_value(edit, "angle", 90.0)),
+        "expand": read_bool_edit_value(edit, "expand", True),
+        "direction": str(read_edit_value(edit, "direction", "horizontal")),
+        "radius": float(read_edit_value(edit, "radius", 2.0)),
+        "width": read_optional_int_edit_value(edit, "width"),
+        "height": read_optional_int_edit_value(edit, "height"),
+        "left": read_optional_int_edit_value(edit, "left"),
+        "top": read_optional_int_edit_value(edit, "top"),
+        "right": read_optional_int_edit_value(edit, "right"),
+        "bottom": read_optional_int_edit_value(edit, "bottom"),
+        "amount": float(read_edit_value(edit, "amount", 0.02)),
+        "salt_vs_pepper": float(read_edit_value(edit, "salt_vs_pepper", 0.5)),
+    }
+
+
+def edit_changes_image_geometry(edit: dict) -> bool:
+    if edit["target"] == "object":
+        return edit["operation"] == "crop"
+
+    return edit["operation"] in ["rotate", "flip", "resize", "crop"]
+
+
+def validate_multi_edit_order(edits: list[dict]) -> None:
+    original_boxes_still_match = True
+
+    for edit in edits:
+        if edit["target"] == "object" and not original_boxes_still_match:
+            raise ValueError(
+                "object edits must come before whole-image geometry edits"
+            )
+
+        if edit_changes_image_geometry(edit):
+            original_boxes_still_match = False
+
+
+def apply_entire_image_edit_to_image(img: Image.Image, edit: dict) -> Image.Image:
+    image_b64 = image_to_png_base64(img)
+    processed_image_b64 = call_image_operation(
+        edit["operation"],
+        image_b64,
+        "entire_image",
+        edit["angle"],
+        edit["expand"],
+        edit["direction"],
+        edit["radius"],
+        edit["width"],
+        edit["height"],
+        edit["left"],
+        edit["top"],
+        edit["right"],
+        edit["bottom"],
+        edit["amount"],
+        edit["salt_vs_pepper"],
+    )
+    return base64_to_image(processed_image_b64).convert("RGBA")
+
+
+def apply_object_edit_to_image(
+    img: Image.Image,
+    selected_object: dict,
+    edit: dict,
+) -> Image.Image:
+    full_img = img.convert("RGBA")
+    box = selected_object["box"]
+
+    if edit["operation"] == "crop":
+        return full_img.crop(box)
+
+    crop_img = full_img.crop(box)
+    crop_b64 = image_to_png_base64(crop_img)
+
+    processed_crop_b64 = call_image_operation(
+        edit["operation"],
+        crop_b64,
+        "object",
+        edit["angle"],
+        False,
+        edit["direction"],
+        edit["radius"],
+        edit["width"],
+        edit["height"],
+        None,
+        None,
+        None,
+        None,
+        edit["amount"],
+        edit["salt_vs_pepper"],
+    )
+
+    processed_crop = base64_to_image(processed_crop_b64).convert("RGBA")
+
+    if processed_crop.size != crop_img.size:
+        processed_crop = processed_crop.resize(crop_img.size)
+
+    full_img.paste(processed_crop, box)
+    return full_img
+
+
 def parse_detection_box(raw_box) -> tuple[int, int, int, int]:
     if isinstance(raw_box, str):
         values = json.loads(raw_box)
@@ -480,25 +645,23 @@ def process_entire_image(
     amount: float,
     salt_vs_pepper: float,
 ) -> bytes:
-    image_b64 = image_bytes_to_base64(original_image_bytes)
-    processed_image_b64 = call_image_operation(
-        operation,
-        image_b64,
-        "entire_image",
-        angle,
-        expand,
-        direction,
-        radius,
-        width,
-        height,
-        left,
-        top,
-        right,
-        bottom,
-        amount,
-        salt_vs_pepper,
-    )
-    return base64.b64decode(processed_image_b64)
+    img = Image.open(io.BytesIO(original_image_bytes))
+    edit = {
+        "operation": operation,
+        "angle": angle,
+        "expand": expand,
+        "direction": direction,
+        "radius": radius,
+        "width": width,
+        "height": height,
+        "left": left,
+        "top": top,
+        "right": right,
+        "bottom": bottom,
+        "amount": amount,
+        "salt_vs_pepper": salt_vs_pepper,
+    }
+    return image_to_png_bytes(apply_entire_image_edit_to_image(img, edit))
 
 
 def process_object_region(
@@ -513,36 +676,19 @@ def process_object_region(
     amount: float,
     salt_vs_pepper: float,
 ) -> bytes:
-    full_img = original_img.convert("RGBA")
-    box = selected_object["box"]
-    crop_img = full_img.crop(box)
-    crop_b64 = image_to_png_base64(crop_img)
-
-    processed_crop_b64 = call_image_operation(
-        operation,
-        crop_b64,
-        "object",
-        angle,
-        False,
-        direction,
-        radius,
-        width,
-        height,
-        None,
-        None,
-        None,
-        None,
-        amount,
-        salt_vs_pepper,
+    edit = {
+        "operation": operation,
+        "angle": angle,
+        "direction": direction,
+        "radius": radius,
+        "width": width,
+        "height": height,
+        "amount": amount,
+        "salt_vs_pepper": salt_vs_pepper,
+    }
+    return image_to_png_bytes(
+        apply_object_edit_to_image(original_img, selected_object, edit)
     )
-
-    processed_crop = base64_to_image(processed_crop_b64).convert("RGBA")
-
-    if processed_crop.size != crop_img.size:
-        processed_crop = processed_crop.resize(crop_img.size)
-
-    full_img.paste(processed_crop, box)
-    return image_to_png_bytes(full_img)
 
 
 @tool
@@ -659,6 +805,102 @@ def process_image(
         return json.dumps({"error": str(exc)})
 
 
+@tool
+def process_image_edits(edits: list[dict]) -> str:
+    """
+    Transform the uploaded image with multiple edits and return one final image.
+
+    Use this when the user asks for two or more image operations in one prompt.
+    Each edit uses the same fields as process_image: operation, target, label,
+    ordinal, from_side, angle, expand, direction, radius, width, height, crop
+    coordinates, amount, and salt_vs_pepper.
+
+    Example:
+    edits=[
+        {"operation": "flip", "target": "object", "label": "person", "ordinal": 1},
+        {"operation": "blur", "target": "object", "label": "person", "from_side": "right"}
+    ]
+    """
+    image_s3_key = _current_image_s3_key.get()
+    if not image_s3_key:
+        return json.dumps({"error": "No image was provided by the user."})
+
+    try:
+        if not isinstance(edits, list) or not edits:
+            raise ValueError("edits must be a non-empty list")
+
+        normalized_edits = []
+        for index, edit in enumerate(edits, start=1):
+            normalized_edits.append(normalize_image_edit(edit, index))
+
+        validate_multi_edit_order(normalized_edits)
+
+        original_image_bytes = read_s3_image_bytes(image_s3_key)
+        original_img = Image.open(io.BytesIO(original_image_bytes)).convert("RGBA")
+        working_img = original_img.copy()
+        prediction_uid = None
+        detection_objects = []
+
+        has_object_edit = False
+        for edit in normalized_edits:
+            if edit["target"] == "object":
+                has_object_edit = True
+
+        if has_object_edit:
+            prediction = request_yolo_prediction(image_s3_key)
+            prediction_uid = prediction["prediction_uid"]
+            prediction_details = get_yolo_prediction_details(prediction_uid)
+            detection_objects = prediction_details["detection_objects"]
+
+        edit_results = []
+
+        for edit in normalized_edits:
+            edit_result = {
+                "operation": edit["operation"],
+                "target": edit["target"],
+            }
+
+            if edit["target"] == "entire_image":
+                working_img = apply_entire_image_edit_to_image(working_img, edit)
+            else:
+                selected_object = select_detection_object(
+                    detection_objects,
+                    edit["label"],
+                    edit["ordinal"],
+                    edit["from_side"],
+                    original_img,
+                )
+                working_img = apply_object_edit_to_image(
+                    working_img,
+                    selected_object,
+                    edit,
+                )
+                edit_result["selected_object"] = selected_object
+
+            edit_results.append(edit_result)
+
+        processed_s3_key = build_processed_image_s3_key(image_s3_key, "multi_edit")
+        upload_image_bytes_to_s3(
+            image_to_png_bytes(working_img),
+            processed_s3_key,
+            "image/png",
+        )
+
+        return json.dumps(
+            {
+                "operation": "multi_edit",
+                "edit_count": len(normalized_edits),
+                "prediction_uid": prediction_uid,
+                "processed_image_s3_key": processed_s3_key,
+                "edits": edit_results,
+                "message": "Image processing completed.",
+            }
+        )
+    except Exception as exc:
+        logging.exception("Could not process image edits")
+        return json.dumps({"error": str(exc)})
+
+
 def fetch_s3_image_b64(image_s3_key: str) -> Optional[str]:
     """
     Fetch an image from S3 and encode it for the API response.
@@ -687,7 +929,9 @@ def fetch_s3_image_b64(image_s3_key: str) -> Optional[str]:
 TOOLS = {
     detect_objects.name: detect_objects,
     process_image.name: process_image,
+    process_image_edits.name: process_image_edits,
 }
+
 
 def validate_model_profile(model_name: Optional[str], profile: dict):
     """
