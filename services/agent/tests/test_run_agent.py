@@ -352,8 +352,9 @@ def test_process_image_edits_combines_multiple_object_edits(agent_module, monkey
     image_s3_key = "chats/chat-123/image-123/original/image.png"
     calls = []
     prediction_calls = []
-    uploaded = {}
+    uploads = []
 
+    monkeypatch.setattr(agent_module.uuid, "uuid4", lambda: "edit-job-123")
     monkeypatch.setattr(
         agent_module,
         "read_s3_image_bytes",
@@ -398,9 +399,13 @@ def test_process_image_edits_combines_multiple_object_edits(agent_module, monkey
     )
 
     def fake_upload_image_bytes_to_s3(image_bytes, key, content_type):
-        uploaded["image_bytes"] = image_bytes
-        uploaded["key"] = key
-        uploaded["content_type"] = content_type
+        uploads.append(
+            {
+                "image_bytes": image_bytes,
+                "key": key,
+                "content_type": content_type,
+            }
+        )
 
     def fake_call_img_proc_mcp_tool(tool_name, arguments):
         crop = Image.open(io.BytesIO(base64.b64decode(arguments["image_b64"])))
@@ -460,11 +465,27 @@ def test_process_image_edits_combines_multiple_object_edits(agent_module, monkey
         agent_module._current_image_s3_key.reset(token)
 
     data = json.loads(result)
-    final_img = Image.open(io.BytesIO(uploaded["image_bytes"]))
+    png_uploads = [
+        upload for upload in uploads if upload["content_type"] == "image/png"
+    ]
+    manifest_uploads = [
+        upload for upload in uploads if upload["content_type"] == "application/json"
+    ]
+    final_upload = png_uploads[-1]
+    final_img = Image.open(io.BytesIO(final_upload["image_bytes"]))
+    final_manifest = json.loads(manifest_uploads[-1]["image_bytes"].decode("utf-8"))
 
     assert data["operation"] == "multi_edit"
+    assert data["edit_job_id"] == "edit-job-123"
     assert data["edit_count"] == 2
     assert data["prediction_uid"] == "prediction-123"
+    assert data["manifest_s3_key"] == (
+        "chats/chat-123/image-123/edits/edit-job-123/manifest.json"
+    )
+    assert data["checkpoint_image_s3_keys"] == [
+        "chats/chat-123/image-123/edits/edit-job-123/step-001-flip.png",
+        "chats/chat-123/image-123/edits/edit-job-123/step-002-blur.png",
+    ]
     assert (
         data["processed_image_s3_key"]
         == "chats/chat-123/image-123/processed/multi_edit.png"
@@ -486,8 +507,17 @@ def test_process_image_edits_combines_multiple_object_edits(agent_module, monkey
             "radius": 5.0,
         },
     ]
-    assert uploaded["key"] == "chats/chat-123/image-123/processed/multi_edit.png"
-    assert uploaded["content_type"] == "image/png"
+    assert final_upload["key"] == "chats/chat-123/image-123/processed/multi_edit.png"
+    assert final_manifest["status"] == "complete"
+    assert final_manifest["current_step"] == 2
+    assert (
+        final_manifest["current_image_s3_key"]
+        == "chats/chat-123/image-123/processed/multi_edit.png"
+    )
+    assert final_manifest["checkpoint_image_s3_keys"] == [
+        "chats/chat-123/image-123/edits/edit-job-123/step-001-flip.png",
+        "chats/chat-123/image-123/edits/edit-job-123/step-002-blur.png",
+    ]
     assert final_img.getpixel((5, 10))[:3] == (255, 0, 0)
     assert final_img.getpixel((85, 10))[:3] == (0, 0, 255)
 
@@ -497,6 +527,8 @@ def test_process_image_edits_detects_after_whole_image_flip(agent_module, monkey
     calls = []
     uploads = []
     prediction_calls = []
+
+    monkeypatch.setattr(agent_module.uuid, "uuid4", lambda: "edit-job-456")
 
     img = Image.new("RGB", (100, 50), "white")
     for x in range(0, 10):
@@ -518,7 +550,9 @@ def test_process_image_edits_detects_after_whole_image_flip(agent_module, monkey
     monkeypatch.setattr(
         agent_module,
         "build_processed_image_s3_key",
-        lambda key, operation: f"chats/chat-123/image-123/processed/{operation}.png",
+        lambda key, operation: (
+            f"chats/chat-123/image-123/processed/{operation}.png"
+        ),
     )
 
     def fake_upload_image_bytes_to_s3(image_bytes, key, content_type):
@@ -532,7 +566,10 @@ def test_process_image_edits_detects_after_whole_image_flip(agent_module, monkey
 
     def fake_request_yolo_prediction(key):
         prediction_calls.append(key)
-        assert key == "chats/chat-123/image-123/processed/detection_source.png"
+        assert key == (
+            "chats/chat-123/image-123/edits/"
+            "edit-job-456/step-001-flip.png"
+        )
         return {"prediction_uid": "prediction-after-flip"}
 
     def fake_get_yolo_prediction_details(uid):
@@ -622,21 +659,39 @@ def test_process_image_edits_detects_after_whole_image_flip(agent_module, monkey
         agent_module._current_image_s3_key.reset(token)
 
     data = json.loads(result)
-    final_upload = uploads[-1]
+    png_uploads = [
+        upload for upload in uploads if upload["content_type"] == "image/png"
+    ]
+    manifest_uploads = [
+        upload for upload in uploads if upload["content_type"] == "application/json"
+    ]
+    final_upload = png_uploads[-1]
     final_img = Image.open(io.BytesIO(final_upload["image_bytes"]))
+    final_manifest = json.loads(manifest_uploads[-1]["image_bytes"].decode("utf-8"))
 
     assert data["operation"] == "multi_edit"
+    assert data["edit_job_id"] == "edit-job-456"
     assert data["prediction_uid"] == "prediction-after-flip"
     assert data["prediction_uids"] == ["prediction-after-flip"]
+    assert data["checkpoint_image_s3_keys"] == [
+        "chats/chat-123/image-123/edits/edit-job-456/step-001-flip.png",
+        "chats/chat-123/image-123/edits/edit-job-456/step-002-blur.png",
+    ]
     assert data["edits"][1]["selected_object"]["id"] == 1
     assert prediction_calls == [
-        "chats/chat-123/image-123/processed/detection_source.png"
+        "chats/chat-123/image-123/edits/edit-job-456/step-001-flip.png"
     ]
     assert (
-        uploads[0]["key"]
-        == "chats/chat-123/image-123/processed/detection_source.png"
+        png_uploads[0]["key"]
+        == "chats/chat-123/image-123/edits/edit-job-456/step-001-flip.png"
     )
     assert final_upload["key"] == "chats/chat-123/image-123/processed/multi_edit.png"
+    assert final_manifest["status"] == "complete"
+    assert final_manifest["current_step"] == 2
+    assert (
+        final_manifest["current_image_s3_key"]
+        == "chats/chat-123/image-123/processed/multi_edit.png"
+    )
     assert calls == [
         {
             "tool_name": "flip",

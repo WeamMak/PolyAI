@@ -206,14 +206,50 @@ def upload_image_bytes_to_s3(
         )
 
 
+def upload_json_to_s3(data: dict, s3_key: str) -> None:
+    json_bytes = json.dumps(data, sort_keys=True).encode("utf-8")
+    upload_image_bytes_to_s3(json_bytes, s3_key, "application/json")
+
+
+def make_safe_s3_name(value: str) -> str:
+    return value.replace(" ", "-").replace("_", "-")
+
+
 def build_processed_image_s3_key(original_image_s3_key: str, operation: str) -> str:
-    safe_operation = operation.replace(" ", "-").replace("_", "-")
+    safe_operation = make_safe_s3_name(operation)
 
     if "/original/" in original_image_s3_key:
         image_prefix = original_image_s3_key.split("/original/", 1)[0]
         return f"{image_prefix}/processed/{uuid.uuid4()}/{safe_operation}.png"
 
     return f"processed/{uuid.uuid4()}/{safe_operation}.png"
+
+
+def build_image_edit_job_prefix(original_image_s3_key: str, job_id: str) -> str:
+    if "/original/" in original_image_s3_key:
+        image_prefix = original_image_s3_key.split("/original/", 1)[0]
+        return f"{image_prefix}/edits/{job_id}"
+
+    return f"edits/{job_id}"
+
+
+def build_image_edit_manifest_s3_key(
+    original_image_s3_key: str,
+    job_id: str,
+) -> str:
+    job_prefix = build_image_edit_job_prefix(original_image_s3_key, job_id)
+    return f"{job_prefix}/manifest.json"
+
+
+def build_image_edit_step_s3_key(
+    original_image_s3_key: str,
+    job_id: str,
+    step_number: int,
+    operation: str,
+) -> str:
+    job_prefix = build_image_edit_job_prefix(original_image_s3_key, job_id)
+    safe_operation = make_safe_s3_name(operation)
+    return f"{job_prefix}/step-{step_number:03d}-{safe_operation}.png"
 
 
 def image_bytes_to_base64(image_bytes: bytes) -> str:
@@ -536,22 +572,6 @@ def apply_object_edit_to_image(
     return full_img
 
 
-def upload_detection_source_image(
-    original_image_s3_key: str,
-    img: Image.Image,
-) -> str:
-    image_s3_key = build_processed_image_s3_key(
-        original_image_s3_key,
-        "detection_source",
-    )
-    upload_image_bytes_to_s3(
-        image_to_png_bytes(img),
-        image_s3_key,
-        "image/png",
-    )
-    return image_s3_key
-
-
 def load_detection_objects(image_s3_key: str) -> tuple[str, list[dict]]:
     prediction = request_yolo_prediction(image_s3_key)
     prediction_uid = prediction["prediction_uid"]
@@ -837,6 +857,10 @@ def process_image_edits(edits: list[dict]) -> str:
     if not image_s3_key:
         return json.dumps({"error": "No image was provided by the user."})
 
+    job_id = None
+    manifest = None
+    manifest_s3_key = None
+
     try:
         if not isinstance(edits, list) or not edits:
             raise ValueError("edits must be a non-empty list")
@@ -854,27 +878,36 @@ def process_image_edits(edits: list[dict]) -> str:
         detections_match_working_image = False
         detection_objects = []
 
+        job_id = str(uuid.uuid4())
+        manifest_s3_key = build_image_edit_manifest_s3_key(image_s3_key, job_id)
+        checkpoint_image_s3_keys = []
         edit_results = []
+        manifest = {
+            "job_id": job_id,
+            "status": "running",
+            "original_image_s3_key": image_s3_key,
+            "edit_count": len(normalized_edits),
+            "current_step": 0,
+            "current_image_s3_key": image_s3_key,
+            "final_image_s3_key": None,
+            "prediction_uids": prediction_uids,
+            "checkpoint_image_s3_keys": checkpoint_image_s3_keys,
+            "steps": edit_results,
+        }
+        upload_json_to_s3(manifest, manifest_s3_key)
 
         for edit in normalized_edits:
             edit_result = {
                 "operation": edit["operation"],
                 "target": edit["target"],
             }
+            geometry_changed = False
 
             if edit["target"] == "entire_image":
                 working_img = apply_entire_image_edit_to_image(working_img, edit)
-                if edit_changes_image_geometry(edit):
-                    detection_image_s3_key = None
-                    detections_match_working_image = False
+                geometry_changed = edit_changes_image_geometry(edit)
             else:
                 if not detections_match_working_image:
-                    if detection_image_s3_key is None:
-                        detection_image_s3_key = upload_detection_source_image(
-                            image_s3_key,
-                            working_img,
-                        )
-
                     prediction_uid, detection_objects = load_detection_objects(
                         detection_image_s3_key
                     )
@@ -895,12 +928,33 @@ def process_image_edits(edits: list[dict]) -> str:
                 )
                 edit_result["selected_object"] = selected_object
                 edit_result["prediction_uid"] = prediction_uid
+                geometry_changed = edit_changes_image_geometry(edit)
 
-                if edit_changes_image_geometry(edit):
-                    detection_image_s3_key = None
-                    detections_match_working_image = False
+            if geometry_changed:
+                detections_match_working_image = False
+
+            step_number = len(edit_results) + 1
+            checkpoint_image_s3_key = build_image_edit_step_s3_key(
+                image_s3_key,
+                job_id,
+                step_number,
+                edit["operation"],
+            )
+            upload_image_bytes_to_s3(
+                image_to_png_bytes(working_img),
+                checkpoint_image_s3_key,
+                "image/png",
+            )
+            checkpoint_image_s3_keys.append(checkpoint_image_s3_key)
+            detection_image_s3_key = checkpoint_image_s3_key
+
+            edit_result["step_number"] = step_number
+            edit_result["checkpoint_image_s3_key"] = checkpoint_image_s3_key
 
             edit_results.append(edit_result)
+            manifest["current_step"] = step_number
+            manifest["current_image_s3_key"] = checkpoint_image_s3_key
+            upload_json_to_s3(manifest, manifest_s3_key)
 
         processed_s3_key = build_processed_image_s3_key(image_s3_key, "multi_edit")
         upload_image_bytes_to_s3(
@@ -909,12 +963,20 @@ def process_image_edits(edits: list[dict]) -> str:
             "image/png",
         )
 
+        manifest["status"] = "complete"
+        manifest["current_image_s3_key"] = processed_s3_key
+        manifest["final_image_s3_key"] = processed_s3_key
+        upload_json_to_s3(manifest, manifest_s3_key)
+
         return json.dumps(
             {
                 "operation": "multi_edit",
+                "edit_job_id": job_id,
                 "edit_count": len(normalized_edits),
                 "prediction_uid": prediction_uid,
                 "prediction_uids": prediction_uids,
+                "manifest_s3_key": manifest_s3_key,
+                "checkpoint_image_s3_keys": checkpoint_image_s3_keys,
                 "processed_image_s3_key": processed_s3_key,
                 "edits": edit_results,
                 "message": "Image processing completed.",
@@ -922,7 +984,20 @@ def process_image_edits(edits: list[dict]) -> str:
         )
     except Exception as exc:
         logging.exception("Could not process image edits")
-        return json.dumps({"error": str(exc)})
+        if manifest is not None and manifest_s3_key is not None:
+            manifest["status"] = "failed"
+            manifest["error"] = str(exc)
+            try:
+                upload_json_to_s3(manifest, manifest_s3_key)
+            except Exception:
+                logging.exception("Could not update image edit manifest")
+
+        error_data = {"error": str(exc)}
+        if job_id is not None:
+            error_data["edit_job_id"] = job_id
+        if manifest_s3_key is not None:
+            error_data["manifest_s3_key"] = manifest_s3_key
+        return json.dumps(error_data)
 
 
 def fetch_s3_image_b64(image_s3_key: str) -> Optional[str]:
