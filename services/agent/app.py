@@ -77,6 +77,8 @@ SYSTEM_PROMPT = (
     "When the user asks for one image transform, call process_image. "
     "When the user asks for two or more image transforms in one request, call "
     "process_image_edits once with every edit in order. "
+    "In multi-step edits, position words like leftmost and rightmost refer to "
+    "the current image after previous edits. "
     "Supported image operations are rotate, flip, blur, resize, crop, and add_noise. "
     "Use add_noise for salt-and-pepper noise requests. "
     "Do not include markdown image placeholders; the frontend displays returned images separately. "
@@ -471,19 +473,6 @@ def edit_changes_image_geometry(edit: dict) -> bool:
     return edit["operation"] in ["rotate", "flip", "resize", "crop"]
 
 
-def validate_multi_edit_order(edits: list[dict]) -> None:
-    original_boxes_still_match = True
-
-    for edit in edits:
-        if edit["target"] == "object" and not original_boxes_still_match:
-            raise ValueError(
-                "object edits must come before whole-image geometry edits"
-            )
-
-        if edit_changes_image_geometry(edit):
-            original_boxes_still_match = False
-
-
 def apply_entire_image_edit_to_image(img: Image.Image, edit: dict) -> Image.Image:
     image_b64 = image_to_png_base64(img)
     processed_image_b64 = call_image_operation(
@@ -545,6 +534,29 @@ def apply_object_edit_to_image(
 
     full_img.paste(processed_crop, box)
     return full_img
+
+
+def upload_detection_source_image(
+    original_image_s3_key: str,
+    img: Image.Image,
+) -> str:
+    image_s3_key = build_processed_image_s3_key(
+        original_image_s3_key,
+        "detection_source",
+    )
+    upload_image_bytes_to_s3(
+        image_to_png_bytes(img),
+        image_s3_key,
+        "image/png",
+    )
+    return image_s3_key
+
+
+def load_detection_objects(image_s3_key: str) -> tuple[str, list[dict]]:
+    prediction = request_yolo_prediction(image_s3_key)
+    prediction_uid = prediction["prediction_uid"]
+    prediction_details = get_yolo_prediction_details(prediction_uid)
+    return prediction_uid, prediction_details["detection_objects"]
 
 
 def parse_detection_box(raw_box) -> tuple[int, int, int, int]:
@@ -833,24 +845,14 @@ def process_image_edits(edits: list[dict]) -> str:
         for index, edit in enumerate(edits, start=1):
             normalized_edits.append(normalize_image_edit(edit, index))
 
-        validate_multi_edit_order(normalized_edits)
-
         original_image_bytes = read_s3_image_bytes(image_s3_key)
         original_img = Image.open(io.BytesIO(original_image_bytes)).convert("RGBA")
         working_img = original_img.copy()
         prediction_uid = None
+        prediction_uids = []
+        detection_image_s3_key = image_s3_key
+        detections_match_working_image = False
         detection_objects = []
-
-        has_object_edit = False
-        for edit in normalized_edits:
-            if edit["target"] == "object":
-                has_object_edit = True
-
-        if has_object_edit:
-            prediction = request_yolo_prediction(image_s3_key)
-            prediction_uid = prediction["prediction_uid"]
-            prediction_details = get_yolo_prediction_details(prediction_uid)
-            detection_objects = prediction_details["detection_objects"]
 
         edit_results = []
 
@@ -862,13 +864,29 @@ def process_image_edits(edits: list[dict]) -> str:
 
             if edit["target"] == "entire_image":
                 working_img = apply_entire_image_edit_to_image(working_img, edit)
+                if edit_changes_image_geometry(edit):
+                    detection_image_s3_key = None
+                    detections_match_working_image = False
             else:
+                if not detections_match_working_image:
+                    if detection_image_s3_key is None:
+                        detection_image_s3_key = upload_detection_source_image(
+                            image_s3_key,
+                            working_img,
+                        )
+
+                    prediction_uid, detection_objects = load_detection_objects(
+                        detection_image_s3_key
+                    )
+                    prediction_uids.append(prediction_uid)
+                    detections_match_working_image = True
+
                 selected_object = select_detection_object(
                     detection_objects,
                     edit["label"],
                     edit["ordinal"],
                     edit["from_side"],
-                    original_img,
+                    working_img,
                 )
                 working_img = apply_object_edit_to_image(
                     working_img,
@@ -876,6 +894,11 @@ def process_image_edits(edits: list[dict]) -> str:
                     edit,
                 )
                 edit_result["selected_object"] = selected_object
+                edit_result["prediction_uid"] = prediction_uid
+
+                if edit_changes_image_geometry(edit):
+                    detection_image_s3_key = None
+                    detections_match_working_image = False
 
             edit_results.append(edit_result)
 
@@ -891,6 +914,7 @@ def process_image_edits(edits: list[dict]) -> str:
                 "operation": "multi_edit",
                 "edit_count": len(normalized_edits),
                 "prediction_uid": prediction_uid,
+                "prediction_uids": prediction_uids,
                 "processed_image_s3_key": processed_s3_key,
                 "edits": edit_results,
                 "message": "Image processing completed.",

@@ -392,7 +392,9 @@ def test_process_image_edits_combines_multiple_object_edits(agent_module, monkey
     monkeypatch.setattr(
         agent_module,
         "build_processed_image_s3_key",
-        lambda key, operation: f"chats/chat-123/image-123/processed/{operation}.png",
+        lambda key, operation: (
+            f"chats/chat-123/image-123/processed/{operation}.png"
+        ),
     )
 
     def fake_upload_image_bytes_to_s3(image_bytes, key, content_type):
@@ -488,6 +490,168 @@ def test_process_image_edits_combines_multiple_object_edits(agent_module, monkey
     assert uploaded["content_type"] == "image/png"
     assert final_img.getpixel((5, 10))[:3] == (255, 0, 0)
     assert final_img.getpixel((85, 10))[:3] == (0, 0, 255)
+
+
+def test_process_image_edits_detects_after_whole_image_flip(agent_module, monkeypatch):
+    image_s3_key = "chats/chat-123/image-123/original/image.png"
+    calls = []
+    uploads = []
+    prediction_calls = []
+
+    img = Image.new("RGB", (100, 50), "white")
+    for x in range(0, 10):
+        for y in range(0, 20):
+            img.putpixel((x, y), (255, 0, 0))
+    for x in range(80, 90):
+        for y in range(0, 20):
+            img.putpixel((x, y), (0, 255, 0))
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    original_image_bytes = buffer.getvalue()
+
+    monkeypatch.setattr(
+        agent_module,
+        "read_s3_image_bytes",
+        lambda key: original_image_bytes,
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "build_processed_image_s3_key",
+        lambda key, operation: f"chats/chat-123/image-123/processed/{operation}.png",
+    )
+
+    def fake_upload_image_bytes_to_s3(image_bytes, key, content_type):
+        uploads.append(
+            {
+                "image_bytes": image_bytes,
+                "key": key,
+                "content_type": content_type,
+            }
+        )
+
+    def fake_request_yolo_prediction(key):
+        prediction_calls.append(key)
+        assert key == "chats/chat-123/image-123/processed/detection_source.png"
+        return {"prediction_uid": "prediction-after-flip"}
+
+    def fake_get_yolo_prediction_details(uid):
+        return {
+            "detection_objects": [
+                {
+                    "id": 1,
+                    "label": "person",
+                    "score": 0.9,
+                    "box": "[90, 0, 100, 20]",
+                },
+                {
+                    "id": 2,
+                    "label": "person",
+                    "score": 0.8,
+                    "box": "[10, 0, 20, 20]",
+                },
+            ]
+        }
+
+    def fake_call_img_proc_mcp_tool(tool_name, arguments):
+        source_img = Image.open(io.BytesIO(base64.b64decode(arguments["image_b64"])))
+
+        calls.append(
+            {
+                "tool_name": tool_name,
+                "image_size": source_img.size,
+                "direction": arguments.get("direction"),
+                "radius": arguments.get("radius"),
+            }
+        )
+
+        if tool_name == "flip":
+            flipped_img = source_img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+            output = io.BytesIO()
+            flipped_img.save(output, format="PNG")
+            return base64.b64encode(output.getvalue()).decode("utf-8")
+
+        if tool_name == "blur":
+            return make_png_b64(size=source_img.size, color="blue")
+
+        raise AssertionError(f"unexpected tool call: {tool_name}")
+
+    monkeypatch.setattr(
+        agent_module,
+        "upload_image_bytes_to_s3",
+        fake_upload_image_bytes_to_s3,
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "request_yolo_prediction",
+        fake_request_yolo_prediction,
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "get_yolo_prediction_details",
+        fake_get_yolo_prediction_details,
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "call_img_proc_mcp_tool",
+        fake_call_img_proc_mcp_tool,
+    )
+
+    token = agent_module._current_image_s3_key.set(image_s3_key)
+    try:
+        result = agent_module.process_image_edits.invoke(
+            {
+                "edits": [
+                    {
+                        "operation": "flip",
+                        "target": "entire_image",
+                        "direction": "horizontal",
+                    },
+                    {
+                        "operation": "blur",
+                        "target": "object",
+                        "label": "person",
+                        "ordinal": 1,
+                        "from_side": "right",
+                        "radius": 5,
+                    },
+                ]
+            }
+        )
+    finally:
+        agent_module._current_image_s3_key.reset(token)
+
+    data = json.loads(result)
+    final_upload = uploads[-1]
+    final_img = Image.open(io.BytesIO(final_upload["image_bytes"]))
+
+    assert data["operation"] == "multi_edit"
+    assert data["prediction_uid"] == "prediction-after-flip"
+    assert data["prediction_uids"] == ["prediction-after-flip"]
+    assert data["edits"][1]["selected_object"]["id"] == 1
+    assert prediction_calls == [
+        "chats/chat-123/image-123/processed/detection_source.png"
+    ]
+    assert (
+        uploads[0]["key"]
+        == "chats/chat-123/image-123/processed/detection_source.png"
+    )
+    assert final_upload["key"] == "chats/chat-123/image-123/processed/multi_edit.png"
+    assert calls == [
+        {
+            "tool_name": "flip",
+            "image_size": (100, 50),
+            "direction": "horizontal",
+            "radius": None,
+        },
+        {
+            "tool_name": "blur",
+            "image_size": (10, 20),
+            "direction": None,
+            "radius": 5.0,
+        },
+    ]
+    assert final_img.getpixel((95, 10))[:3] == (0, 0, 255)
 
 
 def test_upload_image_without_bucket_returns_client_safe_error(agent_module, monkeypatch):
