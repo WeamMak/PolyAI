@@ -14,6 +14,7 @@ import tempfile
 import time
 import signal
 import sys
+from boto3.exceptions import S3UploadFailedError
 from botocore.exceptions import BotoCoreError, ClientError
 from dotenv import load_dotenv
 
@@ -131,7 +132,12 @@ def build_predicted_image_s3_key(original_image_s3_key):
     if "/original/" in original_image_s3_key:
         return original_image_s3_key.replace("/original/", "/predicted/", 1)
 
+    image_dir = os.path.dirname(original_image_s3_key)
     base_name = os.path.basename(original_image_s3_key)
+
+    if image_dir:
+        return f"{image_dir}/predicted/{base_name}"
+
     return f"predicted/{uuid.uuid4()}/{base_name}"
 
 
@@ -155,7 +161,7 @@ def upload_s3_file(local_path, image_s3_key, content_type):
             image_s3_key,
             ExtraArgs={"ContentType": content_type},
         )
-    except (BotoCoreError, ClientError):
+    except (BotoCoreError, ClientError, S3UploadFailedError):
         logging.exception("Could not upload predicted image to S3")
         raise HTTPException(
             status_code=502,

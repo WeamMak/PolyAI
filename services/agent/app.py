@@ -87,6 +87,8 @@ SYSTEM_PROMPT = (
     "Never ask the model to inspect image bytes directly; use tools instead. "
 )
 
+IMAGE_EDIT_ERROR_MESSAGE = "The image edit could not be completed. Please try again."
+
 REQUIRED_MODEL_FEATURES = ["structured_output", "tool_calling"]
 CONTEXT_LIMIT_WARNING_RATIO = 0.9
 
@@ -834,7 +836,7 @@ def process_image(
         )
     except Exception as exc:
         logging.exception("Could not process image")
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": IMAGE_EDIT_ERROR_MESSAGE})
 
 
 @tool
@@ -992,7 +994,7 @@ def process_image_edits(edits: list[dict]) -> str:
             except Exception:
                 logging.exception("Could not update image edit manifest")
 
-        error_data = {"error": str(exc)}
+        error_data = {"error": IMAGE_EDIT_ERROR_MESSAGE}
         if job_id is not None:
             error_data["edit_job_id"] = job_id
         if manifest_s3_key is not None:

@@ -348,6 +348,38 @@ def test_process_image_blurs_second_dog_from_right(agent_module, monkeypatch):
     assert called == {"tool_name": "blur", "crop_size": (10, 20), "radius": 5}
 
 
+def test_process_image_returns_sanitized_error(agent_module, monkeypatch):
+    raw_error = "AccessDenied: arn:aws:s3:::weam-polyai-images/private.png"
+
+    def fake_read_s3_image_bytes(image_s3_key):
+        raise RuntimeError(raw_error)
+
+    monkeypatch.setattr(
+        agent_module,
+        "read_s3_image_bytes",
+        fake_read_s3_image_bytes,
+    )
+
+    token = agent_module._current_image_s3_key.set(
+        "chats/chat-123/image-123/original/image.png"
+    )
+    try:
+        result = agent_module.process_image.invoke(
+            {
+                "operation": "blur",
+                "target": "entire_image",
+            }
+        )
+    finally:
+        agent_module._current_image_s3_key.reset(token)
+
+    data = json.loads(result)
+
+    assert data == {"error": agent_module.IMAGE_EDIT_ERROR_MESSAGE}
+    assert raw_error not in result
+    assert "arn:aws" not in result
+
+
 def test_process_image_edits_combines_multiple_object_edits(agent_module, monkeypatch):
     image_s3_key = "chats/chat-123/image-123/original/image.png"
     calls = []
@@ -707,6 +739,80 @@ def test_process_image_edits_detects_after_whole_image_flip(agent_module, monkey
         },
     ]
     assert final_img.getpixel((95, 10))[:3] == (0, 0, 255)
+
+
+def test_process_image_edits_returns_sanitized_error(agent_module, monkeypatch):
+    image_s3_key = "chats/chat-123/image-123/original/image.png"
+    uploads = []
+    raw_error = (
+        "AccessDenied: arn:aws:s3:::weam-polyai-images/predicted/private.png"
+    )
+
+    monkeypatch.setattr(agent_module.uuid, "uuid4", lambda: "edit-job-789")
+    monkeypatch.setattr(
+        agent_module,
+        "read_s3_image_bytes",
+        lambda key: make_png_bytes(size=(100, 50), color="white"),
+    )
+
+    def fake_upload_image_bytes_to_s3(image_bytes, key, content_type):
+        uploads.append(
+            {
+                "image_bytes": image_bytes,
+                "key": key,
+                "content_type": content_type,
+            }
+        )
+
+    def fake_request_yolo_prediction(key):
+        raise RuntimeError(raw_error)
+
+    monkeypatch.setattr(
+        agent_module,
+        "upload_image_bytes_to_s3",
+        fake_upload_image_bytes_to_s3,
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "request_yolo_prediction",
+        fake_request_yolo_prediction,
+    )
+
+    token = agent_module._current_image_s3_key.set(image_s3_key)
+    try:
+        result = agent_module.process_image_edits.invoke(
+            {
+                "edits": [
+                    {
+                        "operation": "blur",
+                        "target": "object",
+                        "label": "person",
+                        "ordinal": 1,
+                        "from_side": "left",
+                    }
+                ]
+            }
+        )
+    finally:
+        agent_module._current_image_s3_key.reset(token)
+
+    data = json.loads(result)
+    manifest_uploads = [
+        upload for upload in uploads if upload["content_type"] == "application/json"
+    ]
+    final_manifest = json.loads(manifest_uploads[-1]["image_bytes"].decode("utf-8"))
+
+    assert data == {
+        "error": agent_module.IMAGE_EDIT_ERROR_MESSAGE,
+        "edit_job_id": "edit-job-789",
+        "manifest_s3_key": (
+            "chats/chat-123/image-123/edits/edit-job-789/manifest.json"
+        ),
+    }
+    assert raw_error not in result
+    assert "arn:aws" not in result
+    assert final_manifest["status"] == "failed"
+    assert final_manifest["error"] == raw_error
 
 
 def test_upload_image_without_bucket_returns_client_safe_error(agent_module, monkeypatch):
