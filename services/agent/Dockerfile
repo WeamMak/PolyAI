@@ -23,7 +23,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
-COPY app.py .
+COPY app.py agent_loop.py config.py context.py mcp_tools.py storage.py yolo_client.py ./
 
 ENV YOLO_SERVICE_URL=http://yolo:8080
 ENV AWS_REGION=us-east-1

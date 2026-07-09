@@ -2,7 +2,6 @@ import sys
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage, HumanMessage
 
 
 pytestmark = pytest.mark.skipif(
@@ -11,7 +10,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_health_endpoint(agent_module):
+def test_health_endpoint(agent_module, monkeypatch):
+    async def skip_mcp_startup():
+        return None
+
+    monkeypatch.setattr(agent_module, "initialize_agent_tools", skip_mcp_startup)
+
     with TestClient(agent_module.app) as client:
         response = client.get("/health")
 
@@ -19,71 +23,54 @@ def test_health_endpoint(agent_module):
     assert response.json() == {"status": "ok"}
 
 
-def test_chat_endpoint_uses_mocked_agent_loop(agent_module, monkeypatch):
-    captured = {}
-    uploaded = {}
-    image_s3_key = "chats/chat-123/image-123/original/image.jpg"
+def test_chat_keeps_latest_processed_image_for_follow_up(
+    agent_module,
+    monkeypatch,
+):
+    original_key = "chats/chat-1/image-1/original/image.png"
+    processed_key = "chats/chat-1/image-1/processed/id/blur.png"
 
-    def fake_upload_image_base64_to_s3(image_base64, chat_id):
-        uploaded["image_base64"] = image_base64
-        uploaded["chat_id"] = chat_id
-        return image_s3_key
+    async def skip_mcp_startup():
+        return None
 
-    def fake_run_agent(history):
-        captured["history"] = history
-        captured["image_s3_key"] = agent_module._current_image_s3_key.get()
+    async def fake_run_agent(history):
+        assert agent_module._current_image_s3_key.get() == original_key
+        assert "[An image is active." in history[-1].content
+        agent_module._current_image_s3_key.set(processed_key)
         return agent_module.AgentRunResult(
-            response="I found one person.",
-            prediction_id="prediction-123",
-            annotated_image="annotated-image-b64",
-            iterations=2,
-            tools_called=["detect_objects"],
-            context_limit_exceeded=False,
+            response="Blurred the image.",
+            annotated_image="processed-b64",
+            annotated_image_media_type="image/png",
+            iterations=1,
+            tools_called=["blur"],
         )
 
+    monkeypatch.setattr(agent_module, "initialize_agent_tools", skip_mcp_startup)
+    monkeypatch.setattr(agent_module, "run_agent", fake_run_agent)
+    monkeypatch.setattr(agent_module, "check_chat_rate_limit", lambda: None)
     monkeypatch.setattr(
         agent_module,
         "upload_image_base64_to_s3",
-        fake_upload_image_base64_to_s3,
+        lambda image_b64, chat_id: original_key,
     )
-    monkeypatch.setattr(agent_module, "run_agent", fake_run_agent)
-
-    if hasattr(agent_module, "check_chat_rate_limit"):
-        monkeypatch.setattr(agent_module, "check_chat_rate_limit", lambda: None)
 
     with TestClient(agent_module.app) as client:
         response = client.post(
             "/chat",
             json={
+                "chat_id": "chat-1",
                 "messages": [
                     {
                         "role": "user",
-                        "content": "What is in this image?",
+                        "content": "Blur this image",
                         "image_base64": "raw-image-b64",
-                    },
-                    {
-                        "role": "assistant",
-                        "content": "Previous answer.",
-                    },
-                ]
+                    }
+                ],
             },
         )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["response"] == "I found one person."
-    assert data["prediction_id"] == "prediction-123"
-    assert data["annotated_image"] == "annotated-image-b64"
-    assert data["iterations"] == 2
-    assert data["tools_called"] == ["detect_objects"]
-    assert data["context_limit_exceeded"] is False
-    assert isinstance(data["agent_loop_time_s"], float)
-
-    assert uploaded["image_base64"] == "raw-image-b64"
-    assert uploaded["chat_id"]
-    assert captured["image_s3_key"] == image_s3_key
-    assert isinstance(captured["history"][0], HumanMessage)
-    assert isinstance(captured["history"][1], AIMessage)
-    assert "raw-image-b64" not in captured["history"][0].content
-    assert "[An image was uploaded." in captured["history"][0].content
-    assert agent_module._current_image_s3_key.get() is None
+    assert data["chat_id"] == "chat-1"
+    assert data["active_image_s3_key"] == processed_key
+    assert data["annotated_image_media_type"] == "image/png"

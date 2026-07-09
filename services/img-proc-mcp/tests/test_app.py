@@ -1,11 +1,11 @@
 import base64
 import importlib.util
 import io
-import json
 from pathlib import Path
 
 import anyio
-from PIL import Image
+import pytest
+from PIL import Image, ImageDraw
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -23,16 +23,17 @@ def load_app_module():
     return module
 
 
-def make_image_b64(size=(40, 30), color="red"):
-    img = Image.new("RGB", size, color)
+def image_to_base64(img: Image.Image) -> str:
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode()
 
 
-def decode_image(image_b64):
+def decode_image(image_b64: str) -> Image.Image:
     image_bytes = base64.b64decode(image_b64)
-    return Image.open(io.BytesIO(image_bytes))
+    img = Image.open(io.BytesIO(image_bytes))
+    img.load()
+    return img
 
 
 def call_tool(module, name, arguments):
@@ -40,78 +41,208 @@ def call_tool(module, name, arguments):
     return result[1]["result"]
 
 
-def test_mcp_registers_image_processing_tools():
+def make_image(size=(40, 30), color="red") -> Image.Image:
+    return Image.new("RGB", size, color)
+
+
+def make_detection_image() -> tuple[Image.Image, list[dict]]:
+    img = Image.new("RGB", (100, 20), "white")
+    draw = ImageDraw.Draw(img)
+
+    draw.rectangle((0, 0, 9, 19), fill="red")
+    draw.rectangle((10, 0, 19, 19), fill="blue")
+    draw.rectangle((40, 0, 49, 19), fill="green")
+    draw.rectangle((50, 0, 59, 19), fill="yellow")
+    draw.rectangle((80, 0, 89, 19), fill="black")
+    draw.rectangle((90, 0, 99, 19), fill="magenta")
+
+    detections = [
+        {"id": 1, "label": "dog", "score": 0.9, "box": "[0, 0, 20, 20]"},
+        {"id": 2, "label": "dog", "score": 0.8, "box": "[40, 0, 60, 20]"},
+        {"id": 3, "label": "dog", "score": 0.7, "box": "[80, 0, 100, 20]"},
+    ]
+    return img, detections
+
+
+def test_mcp_registers_exact_homework_tools():
     module = load_app_module()
 
     tools = anyio.run(module.mcp.list_tools)
     tool_names = {tool.name for tool in tools}
 
-    assert {
+    assert tool_names == {
         "rotate",
         "flip",
         "blur",
         "resize",
         "crop",
         "add_noise",
-    }.issubset(tool_names)
+    }
 
 
-def test_image_processing_tools_return_valid_png_images():
+def test_all_tools_return_valid_png_images():
     module = load_app_module()
-    image_b64 = make_image_b64()
+    image_b64 = image_to_base64(make_image())
 
     tests = [
         ("rotate", {"image_b64": image_b64, "angle": 90}),
         ("flip", {"image_b64": image_b64, "direction": "horizontal"}),
         ("blur", {"image_b64": image_b64, "radius": 2}),
         ("resize", {"image_b64": image_b64, "width": 20, "height": 10}),
-        ("crop", {"image_b64": image_b64, "left": 0, "top": 0, "right": 20, "bottom": 10}),
-        ("add_noise", {"image_b64": image_b64, "amount": 0.1, "salt_vs_pepper": 0.5}),
+        (
+            "crop",
+            {
+                "image_b64": image_b64,
+                "left": 0,
+                "top": 0,
+                "right": 20,
+                "bottom": 10,
+            },
+        ),
+        (
+            "add_noise",
+            {
+                "image_b64": image_b64,
+                "amount": 0.1,
+                "salt_vs_pepper": 0.5,
+            },
+        ),
     ]
 
     for tool_name, arguments in tests:
-        result_b64 = call_tool(module, tool_name, arguments)
-        img = decode_image(result_b64)
-
+        img = decode_image(call_tool(module, tool_name, arguments))
         assert img.format == "PNG"
-        assert img.width > 0
-        assert img.height > 0
 
 
-def test_resize_and_crop_return_expected_dimensions():
+def test_rotate_resize_and_crop_have_expected_dimensions():
     module = load_app_module()
-    image_b64 = make_image_b64(size=(80, 60))
+    image_b64 = image_to_base64(make_image(size=(80, 60)))
 
-    resized_b64 = call_tool(
-        module,
-        "resize",
-        {"image_b64": image_b64, "width": 30, "height": 20},
+    rotated = decode_image(
+        call_tool(module, "rotate", {"image_b64": image_b64, "angle": 90})
     )
-    cropped_b64 = call_tool(
-        module,
-        "crop",
-        {"image_b64": image_b64, "left": 10, "top": 10, "right": 50, "bottom": 40},
+    resized = decode_image(
+        call_tool(
+            module,
+            "resize",
+            {"image_b64": image_b64, "width": 30, "height": 20},
+        )
+    )
+    cropped = decode_image(
+        call_tool(
+            module,
+            "crop",
+            {
+                "image_b64": image_b64,
+                "left": 10,
+                "top": 10,
+                "right": 50,
+                "bottom": 40,
+            },
+        )
     )
 
-    assert decode_image(resized_b64).size == (30, 20)
-    assert decode_image(cropped_b64).size == (40, 30)
+    assert rotated.size == (60, 80)
+    assert resized.size == (30, 20)
+    assert cropped.size == (40, 30)
 
 
-def test_http_bridge_calls_registered_mcp_tool():
+def test_flip_and_noise_change_pixels_as_requested():
     module = load_app_module()
-    image_b64 = make_image_b64()
+    img = Image.new("RGB", (2, 1))
+    img.putpixel((0, 0), (255, 0, 0))
+    img.putpixel((1, 0), (0, 0, 255))
+    image_b64 = image_to_base64(img)
 
-    class FakeRequest:
-        async def json(self):
-            return {
-                "name": "blur",
-                "arguments": {"image_b64": image_b64, "radius": 2},
-            }
+    flipped = decode_image(
+        call_tool(
+            module,
+            "flip",
+            {"image_b64": image_b64, "direction": "horizontal"},
+        )
+    ).convert("RGB")
+    peppered = decode_image(
+        call_tool(
+            module,
+            "add_noise",
+            {
+                "image_b64": image_b64,
+                "amount": 1.0,
+                "salt_vs_pepper": 0.0,
+            },
+        )
+    ).convert("RGB")
 
-    response = anyio.run(module.call_tool, FakeRequest())
+    assert flipped.getpixel((0, 0)) == (0, 0, 255)
+    assert flipped.getpixel((1, 0)) == (255, 0, 0)
+    assert [
+        peppered.getpixel((0, 0)),
+        peppered.getpixel((1, 0)),
+    ] == [(0, 0, 0), (0, 0, 0)]
 
-    assert response.status_code == 200
 
-    body = json.loads(response.body)
-    img = decode_image(body["result"])
-    assert img.format == "PNG"
+def test_object_tool_selects_second_dog_from_right_inside_mcp():
+    module = load_app_module()
+    img, detections = make_detection_image()
+
+    result = decode_image(
+        call_tool(
+            module,
+            "flip",
+            {
+                "image_b64": image_to_base64(img),
+                "direction": "horizontal",
+                "target": "object",
+                "detection_objects": detections,
+                "label": "dog",
+                "ordinal": 2,
+                "from_side": "right",
+            },
+        )
+    ).convert("RGB")
+
+    assert result.getpixel((5, 10)) == (255, 0, 0)
+    assert result.getpixel((45, 10)) == (255, 255, 0)
+    assert result.getpixel((55, 10)) == (0, 128, 0)
+    assert result.getpixel((85, 10)) == (0, 0, 0)
+
+
+def test_object_crop_and_resize_return_selected_region_dimensions():
+    module = load_app_module()
+    img, detections = make_detection_image()
+    common_arguments = {
+        "image_b64": image_to_base64(img),
+        "target": "object",
+        "detection_objects": detections,
+        "label": "dog",
+        "ordinal": 1,
+        "from_side": "left",
+    }
+
+    cropped = decode_image(call_tool(module, "crop", common_arguments))
+    resized = decode_image(
+        call_tool(
+            module,
+            "resize",
+            {**common_arguments, "width": 50, "height": 10},
+        )
+    )
+
+    assert cropped.size == (20, 20)
+    assert resized.size == (50, 10)
+
+
+def test_object_target_requires_detection_results():
+    module = load_app_module()
+    image_b64 = image_to_base64(make_image())
+
+    with pytest.raises(Exception, match="detection results"):
+        call_tool(
+            module,
+            "blur",
+            {
+                "image_b64": image_b64,
+                "target": "object",
+                "label": "dog",
+            },
+        )

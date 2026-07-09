@@ -65,4 +65,4 @@ jobs:
         run: pip install -r services/img-proc-mcp/requirements.txt
 
       - name: Run image-processing MCP tests
-        run: pytest services/img-proc-mcp/tests/test_app.py
+        run: pytest services/img-proc-mcp/tests

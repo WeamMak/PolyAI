@@ -17,7 +17,7 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
       >
         {message.image_base64 && (
           <img
-            src={`data:image/jpeg;base64,${message.image_base64}`}
+            src={`data:${message.image_media_type ?? "image/jpeg"};base64,${message.image_base64}`}
             alt="uploaded"
             className="mb-2 max-h-48 rounded-lg object-contain"
           />
@@ -40,7 +40,7 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
           <div className="mt-3 flex justify-start">
             <div className="inline-flex max-w-full rounded-lg border border-border/60 bg-background p-2">
               <img
-                src={`data:image/png;base64,${message.annotated_image}`}
+                src={`data:${message.annotated_image_media_type ?? "image/png"};base64,${message.annotated_image}`}
                 alt="image result"
                 className="h-auto max-h-80 w-auto max-w-full rounded-md object-contain"
               />

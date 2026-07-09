@@ -9,11 +9,11 @@ langchain[openai]
 langchain[anthropic]
 langchain[google-genai]
 langchain-aws
+langchain-mcp-adapters>=0.3.0
 
 httpx
 pydantic
 boto3
-pillow
 
 # Testing
 pytest==7.4.0
