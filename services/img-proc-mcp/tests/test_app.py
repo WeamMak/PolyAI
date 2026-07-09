@@ -1,6 +1,7 @@
 import base64
 import importlib.util
 import io
+import logging
 from pathlib import Path
 
 import anyio
@@ -205,6 +206,36 @@ def test_object_tool_selects_second_dog_from_right_inside_mcp():
     assert result.getpixel((45, 10)) == (255, 255, 0)
     assert result.getpixel((55, 10)) == (0, 128, 0)
     assert result.getpixel((85, 10)) == (0, 0, 0)
+
+
+def test_object_selection_debug_log_lists_candidates_without_image_bytes(
+    monkeypatch,
+    caplog,
+):
+    monkeypatch.setenv("DEBUG_OBJECT_SELECTION", "1")
+    module = load_app_module()
+    img, detections = make_detection_image()
+
+    with caplog.at_level(logging.WARNING):
+        call_tool(
+            module,
+            "blur",
+            {
+                "image_b64": image_to_base64(img),
+                "target": "object",
+                "detection_objects": detections,
+                "label": "dog",
+                "ordinal": 2,
+                "from_side": "right",
+            },
+        )
+
+    assert "MCP object selection" in caplog.text
+    assert '"sorted_index": 1' in caplog.text
+    assert '"sorted_index": 2' in caplog.text
+    assert "selected=" in caplog.text
+    assert '"center_x": 50.0' in caplog.text
+    assert "image_b64" not in caplog.text
 
 
 def test_object_crop_and_resize_return_selected_region_dimensions():
