@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Optional
 
 from langchain.chat_models import init_chat_model
@@ -192,14 +193,26 @@ async def run_agent(
             )
 
         for tool_call in response.tool_calls:
-            tool_name = tool_call["name"]
+            raw_tool_name = tool_call["name"]
+            tool_name = raw_tool_name.removesuffix("<|channel|>")
+
+            if tool_name != raw_tool_name:
+                logging.warning(
+                    "Normalized malformed tool name: %r",
+                    raw_tool_name,
+                )
+
             tools_called.append(tool_name)
             tool_fn = TOOLS.get(tool_name)
 
             if tool_fn is None:
-                raise ValueError(f"Unknown tool requested: {tool_name}")
+                raise ValueError(
+                    f"Unknown tool requested: {raw_tool_name}"
+                )
 
-            tool_result = await tool_fn.ainvoke(tool_call)
+            normalized_tool_call = dict(tool_call)
+            normalized_tool_call["name"] = tool_name
+            tool_result = await tool_fn.ainvoke(normalized_tool_call)
 
             try:
                 tool_data = json.loads(tool_result.content)

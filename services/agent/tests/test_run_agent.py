@@ -90,6 +90,70 @@ def test_run_agent_returns_final_response_without_tools(
     assert fake_llm.calls[0][1].content == "Hello"
 
 
+def test_run_agent_removes_exact_harmony_suffix_from_tool_name(
+    agent_components,
+    monkeypatch,
+    caplog,
+):
+    agent_loop = agent_components.agent_loop
+    malformed_call = {
+        "name": "blur<|channel|>",
+        "args": {"target": "entire_image", "radius": 2},
+        "id": "blur-1",
+    }
+    fake_llm = FakeLLM(
+        [
+            AIMessage(content="", tool_calls=[malformed_call]),
+            AIMessage(content="Blurred the image."),
+        ]
+    )
+    blur_tool = FakeTool(
+        json.dumps({"message": "Image processing completed."})
+    )
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(agent_loop, "TOOLS", {"blur": blur_tool})
+
+    result = run_async(
+        agent_loop.run_agent,
+        [HumanMessage(content="Blur this image")],
+    )
+
+    assert result.response == "Blurred the image."
+    assert result.tools_called == ["blur"]
+    assert blur_tool.calls[0]["name"] == "blur"
+    assert "Normalized malformed tool name" in caplog.text
+
+
+def test_run_agent_does_not_modify_a_nonmatching_tool_name(
+    agent_components,
+    monkeypatch,
+):
+    agent_loop = agent_components.agent_loop
+    malformed_call = {
+        "name": "blur<|channel|>extra",
+        "args": {"target": "entire_image", "radius": 2},
+        "id": "blur-1",
+    }
+    fake_llm = FakeLLM(
+        [AIMessage(content="", tool_calls=[malformed_call])]
+    )
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(
+        agent_loop,
+        "TOOLS",
+        {"blur": FakeTool("{}")},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown tool requested: blur<\|channel\|>extra",
+    ):
+        run_async(
+            agent_loop.run_agent,
+            [HumanMessage(content="Blur this image")],
+        )
+
+
 def test_run_agent_executes_detect_then_discovered_image_tool(
     agent_components,
     monkeypatch,

@@ -23,7 +23,7 @@ def test_manual_agent_loop_remains_explicit():
 
     assert "async def run_agent" in agent_loop_source
     assert "for iteration in range" in agent_loop_source
-    assert "await tool_fn.ainvoke(tool_call)" in agent_loop_source
+    assert "await tool_fn.ainvoke(normalized_tool_call)" in agent_loop_source
 
 
 def test_mcp_adapter_is_imported_only_by_mcp_tools_module():
