@@ -150,6 +150,19 @@ TOOLS = {detect_objects.name: detect_objects}
 llm_with_tools = llm.bind_tools(list(TOOLS.values()))
 
 
+def normalize_tool_name(raw_tool_name: str) -> str:
+    channel_marker = "<|channel|>"
+
+    if channel_marker not in raw_tool_name:
+        return raw_tool_name
+
+    tool_name = raw_tool_name.split(channel_marker, 1)[0]
+    if not tool_name:
+        return raw_tool_name
+
+    return tool_name
+
+
 def bind_mcp_tools(mcp_tool_proxies: list) -> None:
     global TOOLS, llm_with_tools
 
@@ -194,7 +207,7 @@ async def run_agent(
 
         for tool_call in response.tool_calls:
             raw_tool_name = tool_call["name"]
-            tool_name = raw_tool_name.removesuffix("<|channel|>")
+            tool_name = normalize_tool_name(raw_tool_name)
 
             if tool_name != raw_tool_name:
                 logging.warning(
