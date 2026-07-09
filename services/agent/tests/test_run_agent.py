@@ -55,12 +55,17 @@ class FakeMCPTool:
 
     async def ainvoke(self, arguments):
         self.calls.append(arguments)
-        return base64.b64encode(PNG_BYTES).decode("utf-8")
+        return [
+            {
+                "type": "text",
+                "text": base64.b64encode(PNG_BYTES).decode("utf-8"),
+            }
+        ]
 
 
-class WrappedResultMCPTool(FakeMCPTool):
+class RawStringMCPTool(FakeMCPTool):
     async def ainvoke(self, arguments):
-        return [{"text": base64.b64encode(PNG_BYTES).decode("utf-8")}]
+        return base64.b64encode(PNG_BYTES).decode("utf-8")
 
 
 def run_async(async_function, *args):
@@ -328,7 +333,7 @@ def test_generic_mcp_proxy_injects_image_and_yolo_results(
     )
 
 
-def test_mcp_proxy_rejects_a_wrapped_image_result(
+def test_mcp_proxy_rejects_a_raw_server_result_without_adapter_shape(
     agent_components,
     monkeypatch,
 ):
@@ -352,7 +357,7 @@ def test_mcp_proxy_rejects_a_wrapped_image_result(
     try:
         result = run_async(
             mcp_tools.execute_mcp_image_tool,
-            WrappedResultMCPTool(),
+            RawStringMCPTool(),
             {"target": "entire_image", "radius": 2},
         )
     finally:
