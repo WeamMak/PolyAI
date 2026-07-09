@@ -26,6 +26,19 @@ def test_manual_agent_loop_remains_explicit():
     assert "await tool_fn.ainvoke(normalized_tool_call)" in agent_loop_source
 
 
+def test_agent_prompt_preserves_user_side_for_object_positions():
+    agent_loop_source = read_module("agent_loop.py")
+
+    assert "'rightmost', 'most right'" in agent_loop_source
+    assert "mean ordinal=1 and from_side='right'" in agent_loop_source
+    assert "'leftmost', 'most left'" in agent_loop_source
+    assert "mean ordinal=1 and from_side='left'" in agent_loop_source
+    assert "Never convert right-side" in agent_loop_source
+    assert "requests into N-from-left" in agent_loop_source
+    assert "never convert left-side requests into" in agent_loop_source
+    assert "N-from-right" in agent_loop_source
+
+
 def test_mcp_adapter_is_imported_only_by_mcp_tools_module():
     modules_with_adapter = []
 
