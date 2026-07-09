@@ -50,10 +50,19 @@ async def execute_mcp_image_tool(mcp_tool, arguments: dict) -> str:
     )
 
     try:
-        result_b64 = await mcp_tool.ainvoke(private_arguments)
-        if not isinstance(result_b64, str):
-            raise ValueError("MCP image tool must return a base64 string")
+        result = await mcp_tool.ainvoke(private_arguments)
+        if (
+            not isinstance(result, list)
+            or len(result) != 1
+            or not isinstance(result[0], dict)
+            or result[0].get("type") != "text"
+            or not isinstance(result[0].get("text"), str)
+        ):
+            raise ValueError(
+                "MCP image tool must return one LangChain text block"
+            )
 
+        result_b64 = result[0]["text"]
         processed_bytes = base64.b64decode(result_b64, validate=True)
 
         if not processed_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
