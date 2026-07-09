@@ -129,6 +129,61 @@ def test_run_agent_removes_harmony_channel_marker_from_tool_name(
     assert "Normalized malformed tool name" in caplog.text
 
 
+def test_run_agent_stores_normalized_tool_name_in_message_history(
+    agent_components,
+    monkeypatch,
+):
+    agent_loop = agent_components.agent_loop
+    malformed_call = {
+        "name": "blur<|channel|>",
+        "args": {"target": "object", "label": "person"},
+        "id": "blur-1",
+    }
+    fake_llm = FakeLLM(
+        [
+            AIMessage(
+                content=[
+                    {"type": "text", "text": ""},
+                    {
+                        "type": "tool_use",
+                        "id": "blur-1",
+                        "name": "blur<|channel|>",
+                        "input": {"target": "object", "label": "person"},
+                    },
+                ],
+                tool_calls=[malformed_call],
+            ),
+            AIMessage(content="Blurred the person."),
+        ]
+    )
+    blur_tool = FakeTool(
+        json.dumps({"message": "Image processing completed."})
+    )
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(agent_loop, "TOOLS", {"blur": blur_tool})
+
+    result = run_async(
+        agent_loop.run_agent,
+        [HumanMessage(content="Blur the most left person")],
+    )
+
+    second_llm_call_messages = fake_llm.calls[1]
+    assistant_tool_message = next(
+        message
+        for message in second_llm_call_messages
+        if isinstance(message, AIMessage) and message.tool_calls
+    )
+    tool_use_block = next(
+        block
+        for block in assistant_tool_message.content
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    )
+
+    assert result.response == "Blurred the person."
+    assert assistant_tool_message.tool_calls[0]["name"] == "blur"
+    assert tool_use_block["name"] == "blur"
+
+
 def test_run_agent_removes_harmony_channel_name_from_tool_name(
     agent_components,
     monkeypatch,

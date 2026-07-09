@@ -163,6 +163,79 @@ def normalize_tool_name(raw_tool_name: str) -> str:
     return tool_name
 
 
+def normalize_content_tool_names(content):
+    if not isinstance(content, list):
+        return content, False
+
+    changed = False
+    normalized_blocks = []
+
+    for block in content:
+        if not isinstance(block, dict):
+            normalized_blocks.append(block)
+            continue
+
+        if block.get("type") == "tool_use":
+            raw_tool_name = block.get("name")
+            if isinstance(raw_tool_name, str):
+                tool_name = normalize_tool_name(raw_tool_name)
+                if tool_name != raw_tool_name:
+                    normalized_block = dict(block)
+                    normalized_block["name"] = tool_name
+                    normalized_blocks.append(normalized_block)
+                    changed = True
+                    continue
+
+        tool_use = block.get("toolUse")
+        if isinstance(tool_use, dict):
+            raw_tool_name = tool_use.get("name")
+            if isinstance(raw_tool_name, str):
+                tool_name = normalize_tool_name(raw_tool_name)
+                if tool_name != raw_tool_name:
+                    normalized_tool_use = dict(tool_use)
+                    normalized_tool_use["name"] = tool_name
+                    normalized_block = dict(block)
+                    normalized_block["toolUse"] = normalized_tool_use
+                    normalized_blocks.append(normalized_block)
+                    changed = True
+                    continue
+
+        normalized_blocks.append(block)
+
+    return normalized_blocks, changed
+
+
+def normalize_ai_message_tool_names(response: AIMessage) -> AIMessage:
+    changed = False
+    normalized_tool_calls = []
+
+    for tool_call in response.tool_calls:
+        normalized_tool_call = dict(tool_call)
+        raw_tool_name = normalized_tool_call.get("name")
+
+        if isinstance(raw_tool_name, str):
+            tool_name = normalize_tool_name(raw_tool_name)
+            if tool_name != raw_tool_name:
+                normalized_tool_call["name"] = tool_name
+                changed = True
+
+        normalized_tool_calls.append(normalized_tool_call)
+
+    normalized_content, content_changed = normalize_content_tool_names(
+        response.content
+    )
+
+    if not changed and not content_changed:
+        return response
+
+    return response.model_copy(
+        update={
+            "content": normalized_content,
+            "tool_calls": normalized_tool_calls,
+        }
+    )
+
+
 def bind_mcp_tools(mcp_tool_proxies: list) -> None:
     global TOOLS, llm_with_tools
 
@@ -185,7 +258,7 @@ async def run_agent(
 
     for iteration in range(1, max_iterations + 1):
         response: AIMessage = await llm_with_tools.ainvoke(messages)
-        messages.append(response)
+        messages.append(normalize_ai_message_tool_names(response))
 
         latest_tokens = read_token_usage(response)
         tokens_used = add_token_usage(tokens_used, latest_tokens)
