@@ -95,7 +95,7 @@ def test_run_agent_returns_final_response_without_tools(
     assert fake_llm.calls[0][1].content == "Hello"
 
 
-def test_run_agent_removes_exact_harmony_suffix_from_tool_name(
+def test_run_agent_removes_harmony_channel_marker_from_tool_name(
     agent_components,
     monkeypatch,
     caplog,
@@ -129,15 +129,54 @@ def test_run_agent_removes_exact_harmony_suffix_from_tool_name(
     assert "Normalized malformed tool name" in caplog.text
 
 
-def test_run_agent_does_not_modify_a_nonmatching_tool_name(
+def test_run_agent_removes_harmony_channel_name_from_tool_name(
+    agent_components,
+    monkeypatch,
+    caplog,
+):
+    agent_loop = agent_components.agent_loop
+    malformed_call = {
+        "name": "detect_objects<|channel|>commentary",
+        "args": {},
+        "id": "detect-1",
+    }
+    fake_llm = FakeLLM(
+        [
+            AIMessage(content="", tool_calls=[malformed_call]),
+            AIMessage(content="Found the objects."),
+        ]
+    )
+    detect_tool = FakeTool(
+        json.dumps(
+            {
+                "prediction_uid": "prediction-1",
+                "detection_objects": [],
+            }
+        )
+    )
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(agent_loop, "TOOLS", {"detect_objects": detect_tool})
+
+    result = run_async(
+        agent_loop.run_agent,
+        [HumanMessage(content="What is in this image?")],
+    )
+
+    assert result.response == "Found the objects."
+    assert result.tools_called == ["detect_objects"]
+    assert detect_tool.calls[0]["name"] == "detect_objects"
+    assert "Normalized malformed tool name" in caplog.text
+
+
+def test_run_agent_still_rejects_unknown_tool_name(
     agent_components,
     monkeypatch,
 ):
     agent_loop = agent_components.agent_loop
     malformed_call = {
-        "name": "blur<|channel|>extra",
+        "name": "sharpen<|channel|>commentary",
         "args": {"target": "entire_image", "radius": 2},
-        "id": "blur-1",
+        "id": "sharpen-1",
     }
     fake_llm = FakeLLM(
         [AIMessage(content="", tool_calls=[malformed_call])]
@@ -151,7 +190,7 @@ def test_run_agent_does_not_modify_a_nonmatching_tool_name(
 
     with pytest.raises(
         ValueError,
-        match=r"Unknown tool requested: blur<\|channel\|>extra",
+        match=r"Unknown tool requested: sharpen<\|channel\|>commentary",
     ):
         run_async(
             agent_loop.run_agent,
