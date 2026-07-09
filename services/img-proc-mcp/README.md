@@ -61,3 +61,14 @@ The standard Streamable HTTP MCP endpoint is:
 ```text
 http://localhost:8090/mcp
 ```
+
+## Debug Object Selection
+
+To see how object-specific edits choose a detection, set:
+
+```bash
+DEBUG_OBJECT_SELECTION=1
+```
+
+The MCP logs `label`, `ordinal`, `from_side`, sorted candidate boxes, centers,
+areas, scores, and the selected box. It does not log image bytes.

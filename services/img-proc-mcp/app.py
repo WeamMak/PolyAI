@@ -2,6 +2,7 @@ import base64
 import binascii
 import io
 import json
+import logging
 import os
 import random
 from typing import Optional
@@ -16,6 +17,7 @@ from starlette.responses import JSONResponse
 MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.environ.get("MCP_PORT", "8090"))
 MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
+DEBUG_OBJECT_SELECTION = os.environ.get("DEBUG_OBJECT_SELECTION") == "1"
 
 mcp = FastMCP(
     "img-proc",
@@ -132,6 +134,48 @@ def _detection_center(detection: dict) -> tuple[float, float]:
     return ((left + right) / 2, (top + bottom) / 2)
 
 
+def _detection_debug_summary(index: int, detection: dict) -> dict:
+    left, top, right, bottom = detection["box"]
+    center_x, center_y = _detection_center(detection)
+
+    return {
+        "sorted_index": index,
+        "label": detection.get("label"),
+        "score": detection.get("score"),
+        "box": [left, top, right, bottom],
+        "center_x": center_x,
+        "center_y": center_y,
+        "area": (right - left) * (bottom - top),
+    }
+
+
+def _log_object_selection(
+    label: str,
+    ordinal: int,
+    from_side: str,
+    matches: list[dict],
+    selected: dict,
+) -> None:
+    if not DEBUG_OBJECT_SELECTION:
+        return
+
+    candidates = [
+        _detection_debug_summary(index, detection)
+        for index, detection in enumerate(matches, start=1)
+    ]
+    selected_summary = _detection_debug_summary(ordinal, selected)
+
+    logging.warning(
+        "MCP object selection: label=%s ordinal=%s from_side=%s "
+        "candidates=%s selected=%s",
+        label,
+        ordinal,
+        from_side,
+        json.dumps(candidates),
+        json.dumps(selected_summary),
+    )
+
+
 def _select_detection_object(
     detection_objects: Optional[list[dict]],
     label: Optional[str],
@@ -192,7 +236,15 @@ def _select_detection_object(
             f"Only {len(matches)} detected object(s) matched label '{label}'"
         )
 
-    return matches[ordinal - 1]
+    selected = matches[ordinal - 1]
+    _log_object_selection(
+        label_lower,
+        ordinal,
+        normalized_side,
+        matches,
+        selected,
+    )
+    return selected
 
 
 def _read_target(
