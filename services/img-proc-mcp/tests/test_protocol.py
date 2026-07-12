@@ -73,3 +73,14 @@ def test_streamable_http_app_exposes_mcp_without_private_rest_bridge():
 
     assert "/mcp" in route_paths
     assert "/tools/call" not in route_paths
+
+
+def test_kubernetes_service_hostname_is_allowed():
+    mcp = load_mcp_server()
+    transport_security = mcp.settings.transport_security
+
+    assert "img-proc-mcp-svc:*" in transport_security.allowed_hosts
+    assert (
+        "http://img-proc-mcp-svc:*"
+        in transport_security.allowed_origins
+    )

@@ -30,11 +30,13 @@ mcp = FastMCP(
             "127.0.0.1:*",
             "localhost:*",
             "img-proc-mcp:*",
+            "img-proc-mcp-svc:*",
         ],
         allowed_origins=[
             "http://127.0.0.1:*",
             "http://localhost:*",
             "http://img-proc-mcp:*",
+            "http://img-proc-mcp-svc:*",
         ],
     ),
 )

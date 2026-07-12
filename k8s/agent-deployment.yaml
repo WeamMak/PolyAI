@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  labels:
+    app: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+    spec:
+      containers:
+        - name: agent
+          image: docker.io/weammakhoul/agent-service:dev-daed11661bb799c77ed12be0a821253e16891608
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MODEL
+              value: "bedrock/openai.gpt-oss-20b-1:0"
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: AWS_S3_BUCKET
+              value: "weam-polyai-images"
+            - name: YOLO_SERVICE_URL
+              value: "http://yolo-svc:8080"
+            - name: IMG_PROC_MCP_URL
+              value: "http://img-proc-mcp-svc:8090"
