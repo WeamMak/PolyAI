@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: docker.io/weammakhoul/agent-service:dev-daed11661bb799c77ed12be0a821253e16891608
+          image: docker.io/weammakhoul/agent-service:k8s-3b6c431a51ff
           ports:
             - containerPort: 8000
           env:

@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: docker.io/weammakhoul/frontend-service:dev-8b96f8b6cc2834a3dbeee2321d37599d79685aba
+          image: docker.io/weammakhoul/frontend-service:k8s-3b6c431a51ff
           ports:
             - containerPort: 3000

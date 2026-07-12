@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: img-proc-mcp
-          image: docker.io/weammakhoul/img-proc-mcp-service:dev-8b96f8b6cc2834a3dbeee2321d37599d79685aba
+          image: docker.io/weammakhoul/img-proc-mcp-service:k8s-3b6c431a51ff
           ports:
             - containerPort: 8090
           env:
