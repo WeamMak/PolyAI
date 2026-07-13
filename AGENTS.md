@@ -113,3 +113,9 @@ result = create_react_agent(llm, tools).invoke(state)
 ### Do not use high-level agent frameworks as a black box
 `create_react_agent`, `AgentExecutor`, and similar wrappers hide the loop that students need to learn.
 Implement the ReAct loop manually in `run_agent()` inside `services/agent/app.py`.
+
+
+## Kubernetes
+
+When working with Kubernetes manifests, Helm charts, or Kustomize overlays, follow the workflow in `.kubernetes-skill/SKILL.md`.
+Load references from `.kubernetes-skill/references/` as needed.

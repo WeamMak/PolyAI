@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - yolo-config.yaml
+  - yolo-deployment.yaml
+  - yolo-service.yaml
+  - img-proc-mcp-config.yaml
+  - img-proc-mcp-deployment.yaml
+  - img-proc-mcp-service.yaml
+  - agent-config.yaml
+  - agent-deployment.yaml
+  - agent-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - prometheus-config.yaml
+  - prometheus-deployment.yaml
+  - prometheus-service.yaml
+  - grafana-config.yaml
+  - grafana-deployment.yaml
+  - grafana-service.yaml

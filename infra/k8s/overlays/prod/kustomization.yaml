@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prod
+
+resources:
+  - ../../base
+  - namespace.yaml
+
+# Update these tags to the tested main commit before building and deploying prod.
+images:
+  - name: docker.io/weammakhoul/yolo-service
+    newTag: k8s-main-246bb9fb4648edb3e89ba2538ccffe43e281cf08
+  - name: docker.io/weammakhoul/agent-service
+    newTag: k8s-main-246bb9fb4648edb3e89ba2538ccffe43e281cf08
+  - name: docker.io/weammakhoul/frontend-service
+    newTag: k8s-main-246bb9fb4648edb3e89ba2538ccffe43e281cf08
+  - name: docker.io/weammakhoul/img-proc-mcp-service
+    newTag: k8s-main-246bb9fb4648edb3e89ba2538ccffe43e281cf08
