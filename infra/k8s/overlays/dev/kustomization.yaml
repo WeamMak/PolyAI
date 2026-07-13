@@ -10,10 +10,10 @@ resources:
 # Build and push these images before applying this overlay.
 images:
   - name: docker.io/weammakhoul/yolo-service
-    newTag: k8s-dev-078713f552381d5f055d2ce68a572548e5b2ffa1
+    newTag: k8s-dev-c86219510050823a73c5d82fad3c354b57f62693
   - name: docker.io/weammakhoul/agent-service
-    newTag: k8s-dev-078713f552381d5f055d2ce68a572548e5b2ffa1
+    newTag: k8s-dev-c86219510050823a73c5d82fad3c354b57f62693
   - name: docker.io/weammakhoul/frontend-service
-    newTag: k8s-dev-078713f552381d5f055d2ce68a572548e5b2ffa1
+    newTag: k8s-dev-c86219510050823a73c5d82fad3c354b57f62693
   - name: docker.io/weammakhoul/img-proc-mcp-service
-    newTag: k8s-dev-078713f552381d5f055d2ce68a572548e5b2ffa1
+    newTag: k8s-dev-c86219510050823a73c5d82fad3c354b57f62693
