@@ -6,6 +6,8 @@ metadata:
     app: prometheus
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: prometheus
@@ -15,6 +17,8 @@ spec:
         app: prometheus
     spec:
       serviceAccountName: prometheus
+      securityContext:
+        fsGroup: 65534
       containers:
         - name: prometheus
           image: docker.io/prom/prometheus:v3.12.0
@@ -27,7 +31,12 @@ spec:
               mountPath: /etc/prometheus/prometheus.yml
               subPath: prometheus.yml
               readOnly: true
+            - name: prometheus-storage
+              mountPath: /prometheus
       volumes:
         - name: prometheus-config
           configMap:
             name: prometheus-config
+        - name: prometheus-storage
+          persistentVolumeClaim:
+            claimName: prometheus-pvc

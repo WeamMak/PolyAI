@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ebs-storage-class.yaml
+  - prometheus-dev-pv.yaml
+  - prometheus-prod-pv.yaml
