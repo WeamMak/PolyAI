@@ -13,6 +13,7 @@ resources:
   - agent-service.yaml
   - frontend-deployment.yaml
   - frontend-service.yaml
+  - prometheus-rbac.yaml
   - prometheus-config.yaml
   - prometheus-deployment.yaml
   - prometheus-service.yaml
