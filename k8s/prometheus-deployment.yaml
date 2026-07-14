@@ -14,6 +14,8 @@ spec:
       labels:
         app: prometheus
     spec:
+      securityContext:
+        fsGroup: 65534
       containers:
         - name: prometheus
           image: docker.io/prom/prometheus:v3.12.0
@@ -23,7 +25,12 @@ spec:
             - name: prometheus-config
               mountPath: /etc/prometheus/
               readOnly: true
+            - name: prometheus-storage
+              mountPath: /prometheus
       volumes:
         - name: prometheus-config
           configMap:
             name: prometheus-config
+        - name: prometheus-storage
+          persistentVolumeClaim:
+            claimName: prometheus-pvc
