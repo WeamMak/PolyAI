@@ -17,6 +17,7 @@ frontend -> agent -> yolo
 agent -> img-proc-mcp
 prometheus -> yolo metrics
 grafana -> prometheus
+fluent-bit -> S3 container logs (EC2 only)
 ```
 
 ## Environment Files
@@ -183,6 +184,37 @@ sudo systemctl enable docker
 ```
 
 The Compose services use `restart: unless-stopped`, so containers should come back after the EC2 instance restarts.
+
+### EC2 Container Logs
+
+The EC2 Compose stack runs Fluent Bit to collect Docker JSON logs and upload
+gzip-compressed batches to `s3://weam-polyai-logs/logs/` in `us-east-1`.
+This collector is for the old EC2 deployment only; it is not part of the
+Kubernetes deployment.
+
+The S3 bucket should remain private and have an enabled lifecycle rule named
+`delete-logs-after-90-days` that expires all objects 90 days after creation.
+The EC2 instance role needs this permission:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::weam-polyai-logs/logs/*"
+    }
+  ]
+}
+```
+
+After deployment, check the collector and its uploads with:
+
+```bash
+docker compose ps fluent-bit
+docker compose logs fluent-bit
+```
 
 ## Networking Notes
 

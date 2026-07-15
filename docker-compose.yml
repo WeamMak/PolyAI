@@ -90,6 +90,14 @@ services:
     networks:
       - monitoring-net
 
+  fluent-bit:
+    image: fluent/fluent-bit:4.2.7
+    restart: unless-stopped
+    volumes:
+      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log
+
 networks:
   polyai-net:
     name: polyai-net
