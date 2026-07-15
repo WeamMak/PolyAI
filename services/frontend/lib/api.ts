@@ -38,17 +38,29 @@ function getErrorMessage(body: unknown, fallback: string, status: number): strin
   return fallback;
 }
 
-export async function sendMessage(messages: ChatMessage[]): Promise<ChatResponse> {
-  const requestMessages = messages.map((message) => ({
+export async function sendMessage(
+  messages: ChatMessage[],
+  chatId: string | null,
+  activeImageS3Key: string | null
+): Promise<ChatResponse> {
+  const requestMessages = messages.map((message, index) => ({
     role: message.role,
     content: message.content,
-    ...(message.image_base64 ? { image_base64: message.image_base64 } : {}),
+    ...(index === messages.length - 1 && message.image_base64
+      ? { image_base64: message.image_base64 }
+      : {}),
   }));
 
   const res = await fetch(`${AGENT_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: requestMessages }),
+    body: JSON.stringify({
+      messages: requestMessages,
+      ...(chatId ? { chat_id: chatId } : {}),
+      ...(activeImageS3Key
+        ? { active_image_s3_key: activeImageS3Key }
+        : {}),
+    }),
   });
   if (!res.ok) {
     const fallbackMessage = getFallbackErrorMessage(res.status, res.statusText);

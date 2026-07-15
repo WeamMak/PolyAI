@@ -111,6 +111,36 @@ def test_predict_response_model_accepts_expected_shape():
     )
 
 
+def test_build_predicted_image_s3_key_keeps_original_image_prefix():
+    assert yolo_app.build_predicted_image_s3_key(
+        "chats/chat-123/image-123/original/image.png"
+    ) == "chats/chat-123/image-123/predicted/image.png"
+
+
+def test_build_predicted_image_s3_key_keeps_edit_checkpoint_prefix():
+    assert yolo_app.build_predicted_image_s3_key(
+        "chats/chat-123/image-123/edits/job-123/step-002-flip.png"
+    ) == "chats/chat-123/image-123/edits/job-123/predicted/step-002-flip.png"
+
+
+def test_upload_s3_file_returns_clean_error_for_transfer_failure(monkeypatch):
+    class FakeS3Client:
+        def upload_file(self, local_path, bucket, image_s3_key, ExtraArgs):
+            raise yolo_app.S3UploadFailedError("access denied")
+
+    monkeypatch.setattr(yolo_app, "AWS_S3_BUCKET", "polyai-images")
+    monkeypatch.setattr(yolo_app, "get_s3_client", lambda: FakeS3Client())
+
+    with pytest.raises(HTTPException) as error:
+        yolo_app.upload_s3_file(
+            "/tmp/predicted.png",
+            "chats/chat-123/image-123/edits/job-123/predicted/step-002-flip.png",
+            "image/png",
+        )
+
+    assert_http_error(error, 502, "Could not upload predicted image to S3")
+
+
 def test_get_confidence_threshold_uses_default(monkeypatch):
     monkeypatch.delenv("CONFIDENCE_THRESHOLD", raising=False)
     assert get_confidence_threshold() == 0.5

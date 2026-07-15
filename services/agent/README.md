@@ -1,6 +1,20 @@
 # Vision Agent
 
-A LangChain-powered AI vision agent with a manual ReAct loop. Accepts text and base64-encoded images, and can call tools for YOLO object detection and MCP image processing.
+A LangChain-powered AI vision agent with a manual ReAct loop. Accepts text and
+base64-encoded images, calls YOLO for detection, and discovers image tools from
+the image-processing service through standard MCP.
+
+## Source Layout
+
+```text
+app.py          FastAPI routes and request orchestration
+agent_loop.py   Model setup and the explicit manual tool-calling loop
+config.py       Environment-derived settings
+context.py      Request-local image and detection state
+mcp_tools.py    MCP discovery, private argument injection, and proxies
+storage.py      S3 and opaque image transport
+yolo_client.py  YOLO HTTP client and detect_objects tool
+```
 
 ## Prerequisites
 
@@ -51,12 +65,19 @@ The Agent does not send image bytes to YOLO, and it does not fetch predicted ima
 
 For image-processing prompts:
 
-1. The Agent downloads the original image from S3 inside the tool implementation.
-1. For whole-image operations, it sends the full image as base64 to the MCP service.
-1. For object-specific operations, it asks YOLO for bounding boxes, crops only the selected object region, sends that crop to the MCP service, and pastes the processed crop back into the full image.
-1. The Agent uploads the processed PNG to S3 and returns that image to the frontend as `annotated_image` base64.
+1. The Agent discovers the six image tools from the MCP `/mcp` endpoint.
+1. The LLM chooses a focused MCP tool and describes the requested object using
+   `label`, `ordinal`, and `from_side`.
+1. The Agent privately injects the current image base64 and the complete YOLO
+   detection JSON into the MCP call.
+1. The MCP service selects the detection, performs every pixel operation, and
+   returns a processed PNG.
+1. The Agent treats the returned bytes as opaque data, uploads them to S3, and
+   returns the image to the frontend.
 
-The LLM still receives text-only tool results. Image bytes are never added to LangChain messages.
+The Agent does not import Pillow or interpret bounding boxes. The LLM still
+receives text-only tool results; image bytes are never added to LangChain
+messages.
 
 Allowed Bedrock models:
 
@@ -131,8 +152,11 @@ Response:
 ```json
 {
   "response": "string",
+  "chat_id": "stable chat identifier",
+  "active_image_s3_key": "current original or processed image key",
   "prediction_id": "string or null",
   "annotated_image": "base64-encoded annotated or processed image, or null",
+  "annotated_image_media_type": "image/jpeg, image/png, or null",
   "tokens_used": {
     "input": 312,
     "output": 22,
@@ -140,7 +164,7 @@ Response:
   },
   "agent_loop_time_s": 1.23,
   "iterations": 2,
-  "tools_called": ["detect_objects", "process_image"],
+  "tools_called": ["detect_objects", "blur"],
   "context_limit_exceeded": false
 }
 ```

@@ -1,11 +1,13 @@
 import base64
-import io
 import json
 
+import anyio
 import pytest
 from fastapi import HTTPException
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from PIL import Image
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\nprocessed-image"
 
 
 class FakeLLM:
@@ -13,8 +15,8 @@ class FakeLLM:
         self.responses = list(responses)
         self.calls = []
 
-    def invoke(self, messages):
-        self.calls.append(messages)
+    async def ainvoke(self, messages):
+        self.calls.append(list(messages))
         return self.responses.pop(0)
 
 
@@ -23,7 +25,7 @@ class FakeTool:
         self.content = content
         self.calls = []
 
-    def invoke(self, tool_call):
+    async def ainvoke(self, tool_call):
         self.calls.append(tool_call)
         return ToolMessage(
             content=self.content,
@@ -31,356 +33,495 @@ class FakeTool:
         )
 
 
-class FakeYoloResponse:
-    def raise_for_status(self):
-        pass
+class FakeMCPTool:
+    name = "blur"
+    description = "Blur an image or selected object."
+    args_schema = {
+        "type": "object",
+        "properties": {
+            "image_b64": {"type": "string"},
+            "detection_objects": {"type": "array", "items": {"type": "object"}},
+            "target": {"type": "string", "default": "entire_image"},
+            "label": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "ordinal": {"type": "integer", "default": 1},
+            "from_side": {"type": "string", "default": "left"},
+            "radius": {"type": "number", "default": 2.0},
+        },
+        "required": ["image_b64"],
+    }
 
-    def json(self):
-        return {
-            "prediction_uid": "prediction-123",
-            "detection_count": 1,
-            "labels": ["person"],
-            "time_took": 0.2,
-            "predicted_image_s3_key": (
-                "chats/chat-123/image-123/predicted/image.jpg"
-            ),
-        }
-
-
-class FakeHttpClient:
-    def __init__(self, timeout):
-        self.timeout = timeout
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        pass
-
-    def post(self, url, json):
-        self.url = url
-        self.json_body = json
-        return FakeYoloResponse()
-
-
-class FakeS3Body:
-    def read(self):
-        return b"annotated image bytes"
-
-
-class FakeS3Client:
     def __init__(self):
-        self.bucket = None
-        self.key = None
+        self.calls = []
 
-    def get_object(self, Bucket, Key):
-        self.bucket = Bucket
-        self.key = Key
-        return {"Body": FakeS3Body()}
-
-
-def make_png_bytes(size=(40, 30), color="red"):
-    img = Image.new("RGB", size, color)
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    return buffer.getvalue()
+    async def ainvoke(self, arguments):
+        self.calls.append(arguments)
+        return [
+            {
+                "type": "text",
+                "text": base64.b64encode(PNG_BYTES).decode("utf-8"),
+            }
+        ]
 
 
-def make_png_b64(size=(40, 30), color="red"):
-    return base64.b64encode(make_png_bytes(size, color)).decode("utf-8")
+class RawStringMCPTool(FakeMCPTool):
+    async def ainvoke(self, arguments):
+        return base64.b64encode(PNG_BYTES).decode("utf-8")
 
 
-def test_run_agent_returns_final_response_without_tools(agent_module, monkeypatch):
+def run_async(async_function, *args):
+    async def runner():
+        return await async_function(*args)
+
+    return anyio.run(runner)
+
+
+def test_run_agent_returns_final_response_without_tools(
+    agent_components,
+    monkeypatch,
+):
+    agent_loop = agent_components.agent_loop
     fake_llm = FakeLLM([AIMessage(content="Hello from the agent.")])
-    monkeypatch.setattr(agent_module, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
 
-    result = agent_module.run_agent([HumanMessage(content="Hello")])
+    result = run_async(
+        agent_loop.run_agent,
+        [HumanMessage(content="Hello")],
+    )
 
     assert result.response == "Hello from the agent."
     assert result.iterations == 1
     assert result.tools_called == []
-    assert result.context_limit_exceeded is False
     assert fake_llm.calls[0][0].type == "system"
     assert fake_llm.calls[0][1].content == "Hello"
 
 
-def test_run_agent_executes_tool_call(agent_module, monkeypatch):
-    tool_call = {
-        "name": "detect_objects",
-        "args": {},
-        "id": "call-1",
+def test_run_agent_removes_harmony_channel_marker_from_tool_name(
+    agent_components,
+    monkeypatch,
+    caplog,
+):
+    agent_loop = agent_components.agent_loop
+    malformed_call = {
+        "name": "blur<|channel|>",
+        "args": {"target": "entire_image", "radius": 2},
+        "id": "blur-1",
     }
     fake_llm = FakeLLM(
         [
-            AIMessage(content="", tool_calls=[tool_call]),
-            AIMessage(content="The image contains a person."),
+            AIMessage(content="", tool_calls=[malformed_call]),
+            AIMessage(content="Blurred the image."),
         ]
     )
-    fake_tool = FakeTool(
+    blur_tool = FakeTool(
+        json.dumps({"message": "Image processing completed."})
+    )
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(agent_loop, "TOOLS", {"blur": blur_tool})
+
+    result = run_async(
+        agent_loop.run_agent,
+        [HumanMessage(content="Blur this image")],
+    )
+
+    assert result.response == "Blurred the image."
+    assert result.tools_called == ["blur"]
+    assert blur_tool.calls[0]["name"] == "blur"
+    assert "Normalized malformed tool name" in caplog.text
+
+
+def test_run_agent_stores_normalized_tool_name_in_message_history(
+    agent_components,
+    monkeypatch,
+):
+    agent_loop = agent_components.agent_loop
+    malformed_call = {
+        "name": "blur<|channel|>",
+        "args": {"target": "object", "label": "person"},
+        "id": "blur-1",
+    }
+    fake_llm = FakeLLM(
+        [
+            AIMessage(
+                content=[
+                    {"type": "text", "text": ""},
+                    {
+                        "type": "tool_use",
+                        "id": "blur-1",
+                        "name": "blur<|channel|>",
+                        "input": {"target": "object", "label": "person"},
+                    },
+                ],
+                tool_calls=[malformed_call],
+            ),
+            AIMessage(content="Blurred the person."),
+        ]
+    )
+    blur_tool = FakeTool(
+        json.dumps({"message": "Image processing completed."})
+    )
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(agent_loop, "TOOLS", {"blur": blur_tool})
+
+    result = run_async(
+        agent_loop.run_agent,
+        [HumanMessage(content="Blur the most left person")],
+    )
+
+    second_llm_call_messages = fake_llm.calls[1]
+    assistant_tool_message = next(
+        message
+        for message in second_llm_call_messages
+        if isinstance(message, AIMessage) and message.tool_calls
+    )
+    tool_use_block = next(
+        block
+        for block in assistant_tool_message.content
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    )
+
+    assert result.response == "Blurred the person."
+    assert assistant_tool_message.tool_calls[0]["name"] == "blur"
+    assert tool_use_block["name"] == "blur"
+
+
+def test_run_agent_removes_harmony_channel_name_from_tool_name(
+    agent_components,
+    monkeypatch,
+    caplog,
+):
+    agent_loop = agent_components.agent_loop
+    malformed_call = {
+        "name": "detect_objects<|channel|>commentary",
+        "args": {},
+        "id": "detect-1",
+    }
+    fake_llm = FakeLLM(
+        [
+            AIMessage(content="", tool_calls=[malformed_call]),
+            AIMessage(content="Found the objects."),
+        ]
+    )
+    detect_tool = FakeTool(
+        json.dumps(
+            {
+                "prediction_uid": "prediction-1",
+                "detection_objects": [],
+            }
+        )
+    )
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(agent_loop, "TOOLS", {"detect_objects": detect_tool})
+
+    result = run_async(
+        agent_loop.run_agent,
+        [HumanMessage(content="What is in this image?")],
+    )
+
+    assert result.response == "Found the objects."
+    assert result.tools_called == ["detect_objects"]
+    assert detect_tool.calls[0]["name"] == "detect_objects"
+    assert "Normalized malformed tool name" in caplog.text
+
+
+def test_run_agent_still_rejects_unknown_tool_name(
+    agent_components,
+    monkeypatch,
+):
+    agent_loop = agent_components.agent_loop
+    malformed_call = {
+        "name": "sharpen<|channel|>commentary",
+        "args": {"target": "entire_image", "radius": 2},
+        "id": "sharpen-1",
+    }
+    fake_llm = FakeLLM(
+        [AIMessage(content="", tool_calls=[malformed_call])]
+    )
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
+    monkeypatch.setattr(
+        agent_loop,
+        "TOOLS",
+        {"blur": FakeTool("{}")},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Unknown tool requested: sharpen<\|channel\|>commentary",
+    ):
+        run_async(
+            agent_loop.run_agent,
+            [HumanMessage(content="Blur this image")],
+        )
+
+
+def test_run_agent_executes_detect_then_discovered_image_tool(
+    agent_components,
+    monkeypatch,
+):
+    agent_loop = agent_components.agent_loop
+    request_context = agent_components.context
+    detect_call = {"name": "detect_objects", "args": {}, "id": "detect-1"}
+    blur_call = {
+        "name": "blur",
+        "args": {
+            "target": "object",
+            "label": "dog",
+            "ordinal": 2,
+            "from_side": "right",
+            "radius": 5,
+        },
+        "id": "blur-1",
+    }
+    fake_llm = FakeLLM(
+        [
+            AIMessage(content="", tool_calls=[detect_call]),
+            AIMessage(content="", tool_calls=[blur_call]),
+            AIMessage(content="Blurred the second dog."),
+        ]
+    )
+    detections = [
+        {"label": "dog", "box": "[0, 0, 10, 10]"},
+        {"label": "dog", "box": "[20, 0, 30, 10]"},
+    ]
+    detect_tool = FakeTool(
         json.dumps(
             {
                 "prediction_uid": "prediction-123",
-                "predicted_image_s3_key": (
-                    "chats/chat-123/image-123/predicted/image.jpg"
-                ),
+                "detection_objects": detections,
             }
         )
     )
-    captured = {}
-
-    monkeypatch.setattr(agent_module, "llm_with_tools", fake_llm)
-    monkeypatch.setattr(agent_module, "TOOLS", {"detect_objects": fake_tool})
-
-    def fake_fetch_s3_image_b64(image_s3_key):
-        captured["predicted_image_s3_key"] = image_s3_key
-        return "annotated-image-b64"
-
-    monkeypatch.setattr(
-        agent_module,
-        "fetch_s3_image_b64",
-        fake_fetch_s3_image_b64,
-    )
-
-    result = agent_module.run_agent([HumanMessage(content="Detect objects")])
-
-    assert result.response == "The image contains a person."
-    assert result.prediction_id == "prediction-123"
-    assert result.annotated_image == "annotated-image-b64"
-    assert result.iterations == 2
-    assert result.tools_called == ["detect_objects"]
-    assert (
-        captured["predicted_image_s3_key"]
-        == "chats/chat-123/image-123/predicted/image.jpg"
-    )
-    assert fake_tool.calls[0]["name"] == "detect_objects"
-    assert fake_tool.calls[0]["id"] == "call-1"
-    assert any(isinstance(message, ToolMessage) for message in fake_llm.calls[1])
-
-
-def test_run_agent_fetches_processed_image_for_frontend(agent_module, monkeypatch):
-    tool_call = {
-        "name": "process_image",
-        "args": {"operation": "rotate", "angle": 90},
-        "id": "call-1",
-    }
-    fake_llm = FakeLLM(
-        [
-            AIMessage(content="", tool_calls=[tool_call]),
-            AIMessage(content="Rotated the image."),
-        ]
-    )
-    fake_tool = FakeTool(
+    blur_tool = FakeTool(
         json.dumps(
             {
                 "processed_image_s3_key": (
-                    "chats/chat-123/image-123/processed/rotate.png"
-                ),
+                    "chats/chat-1/image-1/processed/id/blur.png"
+                )
             }
         )
     )
-    captured = {}
 
-    monkeypatch.setattr(agent_module, "llm_with_tools", fake_llm)
-    monkeypatch.setattr(agent_module, "TOOLS", {"process_image": fake_tool})
-
-    def fake_fetch_s3_image_b64(image_s3_key):
-        captured["processed_image_s3_key"] = image_s3_key
-        return "processed-image-b64"
-
+    monkeypatch.setattr(agent_loop, "llm_with_tools", fake_llm)
     monkeypatch.setattr(
-        agent_module,
-        "fetch_s3_image_b64",
-        fake_fetch_s3_image_b64,
+        agent_loop,
+        "TOOLS",
+        {"detect_objects": detect_tool, "blur": blur_tool},
+    )
+    monkeypatch.setattr(
+        agent_loop.storage,
+        "fetch_s3_image",
+        lambda key: ("processed-b64", "image/png"),
     )
 
-    result = agent_module.run_agent([HumanMessage(content="Rotate this image")])
-
-    assert result.response == "Rotated the image."
-    assert result.annotated_image == "processed-image-b64"
-    assert result.tools_called == ["process_image"]
-    assert (
-        captured["processed_image_s3_key"]
-        == "chats/chat-123/image-123/processed/rotate.png"
+    image_token = request_context.current_image_s3_key.set(
+        "chats/chat-1/image-1/original/image.png"
     )
-
-
-def test_detect_objects_sends_s3_key_to_yolo(agent_module, monkeypatch):
-    fake_client = FakeHttpClient(timeout=30.0)
-    monkeypatch.setattr(agent_module.httpx, "Client", lambda timeout: fake_client)
-
-    token = agent_module._current_image_s3_key.set(
-        "chats/chat-123/image-123/original/image.jpg"
-    )
+    detection_token = request_context.current_detection_objects.set(None)
     try:
-        result = agent_module.detect_objects.invoke({})
-    finally:
-        agent_module._current_image_s3_key.reset(token)
+        async def run_and_read_active_key():
+            result = await agent_loop.run_agent(
+                [HumanMessage(content="Blur the second dog")]
+            )
+            return result, request_context.current_image_s3_key.get()
 
-    assert fake_client.timeout == 30.0
-    assert fake_client.url == f"{agent_module.YOLO_SERVICE_URL}/predict"
-    assert fake_client.json_body == {
-        "image_s3_key": "chats/chat-123/image-123/original/image.jpg"
+        result, active_key = anyio.run(run_and_read_active_key)
+    finally:
+        request_context.current_detection_objects.reset(detection_token)
+        request_context.current_image_s3_key.reset(image_token)
+
+    assert result.response == "Blurred the second dog."
+    assert result.prediction_id == "prediction-123"
+    assert result.annotated_image == "processed-b64"
+    assert result.annotated_image_media_type == "image/png"
+    assert result.tools_called == ["detect_objects", "blur"]
+    assert active_key.endswith("/blur.png")
+    assert blur_tool.calls[0]["args"]["label"] == "dog"
+    assert all(
+        "processed/id/blur.png" not in str(message.content)
+        for message in fake_llm.calls[-1]
+    )
+
+
+def test_public_mcp_schema_hides_only_private_transport_fields(agent_components):
+    schema = agent_components.mcp_tools.public_mcp_tool_schema(FakeMCPTool())
+
+    assert "image_b64" not in schema["properties"]
+    assert "detection_objects" not in schema["properties"]
+    assert schema["required"] == []
+    assert set(schema["properties"]) == {
+        "target",
+        "label",
+        "ordinal",
+        "from_side",
+        "radius",
     }
-    assert json.loads(result) == {
-        "prediction_uid": "prediction-123",
-        "detection_count": 1,
-        "labels": ["person"],
-        "time_took": 0.2,
-        "predicted_image_s3_key": "chats/chat-123/image-123/predicted/image.jpg",
-    }
 
 
-def test_process_image_rotates_entire_image_with_mcp(agent_module, monkeypatch):
-    image_s3_key = "chats/chat-123/image-123/original/image.png"
-    uploaded = {}
-    called = {}
-
-    monkeypatch.setattr(
-        agent_module,
-        "read_s3_image_bytes",
-        lambda key: make_png_bytes(size=(40, 30), color="red"),
-    )
-    monkeypatch.setattr(
-        agent_module,
-        "build_processed_image_s3_key",
-        lambda key, operation: "chats/chat-123/image-123/processed/rotate.png",
-    )
-
-    def fake_call_img_proc_mcp_tool(tool_name, arguments):
-        called["tool_name"] = tool_name
-        called["arguments"] = arguments
-        return make_png_b64(size=(30, 40), color="red")
-
-    def fake_upload_image_bytes_to_s3(image_bytes, key, content_type):
-        uploaded["image_bytes"] = image_bytes
-        uploaded["key"] = key
-        uploaded["content_type"] = content_type
-
-    monkeypatch.setattr(agent_module, "call_img_proc_mcp_tool", fake_call_img_proc_mcp_tool)
-    monkeypatch.setattr(agent_module, "upload_image_bytes_to_s3", fake_upload_image_bytes_to_s3)
-
-    token = agent_module._current_image_s3_key.set(image_s3_key)
-    try:
-        result = agent_module.process_image.invoke(
-            {"operation": "rotate", "target": "entire_image", "angle": 90}
-        )
-    finally:
-        agent_module._current_image_s3_key.reset(token)
-
-    data = json.loads(result)
-
-    assert data["operation"] == "rotate"
-    assert data["processed_image_s3_key"] == "chats/chat-123/image-123/processed/rotate.png"
-    assert called["tool_name"] == "rotate"
-    assert called["arguments"]["angle"] == 90
-    assert "image_b64" in called["arguments"]
-    assert uploaded["key"] == "chats/chat-123/image-123/processed/rotate.png"
-    assert uploaded["content_type"] == "image/png"
-    assert Image.open(io.BytesIO(uploaded["image_bytes"])).size == (30, 40)
-
-
-def test_process_image_blurs_second_dog_from_right(agent_module, monkeypatch):
-    image_s3_key = "chats/chat-123/image-123/original/image.png"
-    called = {}
-
-    monkeypatch.setattr(
-        agent_module,
-        "read_s3_image_bytes",
-        lambda key: make_png_bytes(size=(100, 50), color="white"),
-    )
-    monkeypatch.setattr(
-        agent_module,
-        "request_yolo_prediction",
-        lambda key: {"prediction_uid": "prediction-123"},
-    )
-    monkeypatch.setattr(
-        agent_module,
-        "get_yolo_prediction_details",
-        lambda uid: {
-            "detection_objects": [
-                {"id": 1, "label": "dog", "score": 0.9, "box": "[0, 0, 10, 20]"},
-                {"id": 2, "label": "dog", "score": 0.8, "box": "[40, 0, 50, 20]"},
-                {"id": 3, "label": "dog", "score": 0.7, "box": "[80, 0, 90, 20]"},
-            ]
-        },
-    )
-    monkeypatch.setattr(
-        agent_module,
-        "build_processed_image_s3_key",
-        lambda key, operation: "chats/chat-123/image-123/processed/blur.png",
-    )
-    monkeypatch.setattr(
-        agent_module,
-        "upload_image_bytes_to_s3",
-        lambda image_bytes, key, content_type: None,
-    )
-
-    def fake_call_img_proc_mcp_tool(tool_name, arguments):
-        crop = Image.open(io.BytesIO(base64.b64decode(arguments["image_b64"])))
-        called["tool_name"] = tool_name
-        called["crop_size"] = crop.size
-        called["radius"] = arguments["radius"]
-        return make_png_b64(size=crop.size, color="black")
-
-    monkeypatch.setattr(agent_module, "call_img_proc_mcp_tool", fake_call_img_proc_mcp_tool)
-
-    token = agent_module._current_image_s3_key.set(image_s3_key)
-    try:
-        result = agent_module.process_image.invoke(
-            {
-                "operation": "blur",
-                "target": "object",
-                "label": "dog",
-                "ordinal": 2,
-                "from_side": "right",
-                "radius": 5,
-            }
-        )
-    finally:
-        agent_module._current_image_s3_key.reset(token)
-
-    data = json.loads(result)
-
-    assert data["operation"] == "blur"
-    assert data["prediction_uid"] == "prediction-123"
-    assert data["selected_object"]["id"] == 2
-    assert data["selected_object"]["box"] == [40, 0, 50, 20]
-    assert called == {"tool_name": "blur", "crop_size": (10, 20), "radius": 5}
-
-
-def test_upload_image_without_bucket_returns_client_safe_error(agent_module, monkeypatch):
-    monkeypatch.setattr(agent_module, "AWS_S3_BUCKET", None)
-
-    with pytest.raises(HTTPException) as exc:
-        agent_module.upload_image_base64_to_s3("unused-image-data", "chat-123")
-
-    assert exc.value.status_code == 500
-    assert exc.value.detail == "Image upload is currently unavailable"
-
-
-def test_upload_image_with_invalid_data_returns_client_safe_error(
-    agent_module,
+def test_generic_mcp_proxy_injects_image_and_yolo_results(
+    agent_components,
     monkeypatch,
 ):
-    monkeypatch.setattr(agent_module, "AWS_S3_BUCKET", "polyai-images")
+    mcp_tools = agent_components.mcp_tools
+    request_context = agent_components.context
+    mcp_tool = FakeMCPTool()
+    uploads = []
+    detections = [{"label": "dog", "box": "[10, 0, 20, 10]"}]
+
+    monkeypatch.setattr(
+        mcp_tools.storage,
+        "read_s3_bytes",
+        lambda key: b"\x89PNG\r\n\x1a\noriginal-image",
+    )
+    monkeypatch.setattr(
+        mcp_tools.storage,
+        "build_processed_image_s3_key",
+        lambda key, name: "chats/chat-1/image-1/processed/id/blur.png",
+    )
+    monkeypatch.setattr(
+        mcp_tools.storage,
+        "upload_bytes_to_s3",
+        lambda data, key, content_type: uploads.append(
+            (data, key, content_type)
+        ),
+    )
+
+    image_token = request_context.current_image_s3_key.set(
+        "chats/chat-1/image-1/original/image.png"
+    )
+    detection_token = request_context.current_detection_objects.set(detections)
+    try:
+        proxy = mcp_tools.create_mcp_tool_proxy(mcp_tool)
+        tool_message = run_async(
+            proxy.ainvoke,
+            {
+                "name": "blur",
+                "args": {
+                    "target": "object",
+                    "label": "dog",
+                    "ordinal": 1,
+                    "from_side": "left",
+                    "radius": 5,
+                },
+                "id": "blur-1",
+                "type": "tool_call",
+            },
+        )
+    finally:
+        request_context.current_detection_objects.reset(detection_token)
+        request_context.current_image_s3_key.reset(image_token)
+
+    assert mcp_tool.calls[0]["detection_objects"] == detections
+    assert mcp_tool.calls[0]["radius"] == 5
+    assert base64.b64decode(mcp_tool.calls[0]["image_b64"]).startswith(
+        b"\x89PNG"
+    )
+    assert uploads == [
+        (
+            PNG_BYTES,
+            "chats/chat-1/image-1/processed/id/blur.png",
+            "image/png",
+        )
+    ]
+    assert "image_b64" not in tool_message.content
+    assert json.loads(tool_message.content)["processed_image_s3_key"].endswith(
+        "/blur.png"
+    )
+
+
+def test_mcp_proxy_rejects_a_raw_server_result_without_adapter_shape(
+    agent_components,
+    monkeypatch,
+):
+    mcp_tools = agent_components.mcp_tools
+    request_context = agent_components.context
+
+    monkeypatch.setattr(
+        mcp_tools.storage,
+        "read_s3_bytes",
+        lambda key: b"\x89PNG\r\n\x1a\noriginal-image",
+    )
+    monkeypatch.setattr(
+        mcp_tools.storage,
+        "upload_bytes_to_s3",
+        lambda *args: pytest.fail("invalid MCP output must not be uploaded"),
+    )
+
+    image_token = request_context.current_image_s3_key.set(
+        "chats/chat-1/image-1/original/image.png"
+    )
+    try:
+        result = run_async(
+            mcp_tools.execute_mcp_image_tool,
+            RawStringMCPTool(),
+            {"target": "entire_image", "radius": 2},
+        )
+    finally:
+        request_context.current_image_s3_key.reset(image_token)
+
+    assert json.loads(result) == {
+        "error": agent_components.config.IMAGE_EDIT_ERROR_MESSAGE
+    }
+
+
+def test_detect_objects_stores_and_returns_complete_yolo_json(
+    agent_components,
+    monkeypatch,
+):
+    yolo_client = agent_components.yolo_client
+    request_context = agent_components.context
+    detections = [{"label": "person", "box": "[0, 0, 10, 10]"}]
+
+    async def fake_prediction(key):
+        return {
+            "prediction_uid": "prediction-1",
+            "predicted_image_s3_key": "chats/chat-1/image-1/predicted/image.png",
+        }
+
+    async def fake_details(uid):
+        return {"detection_objects": detections}
+
+    monkeypatch.setattr(yolo_client, "request_yolo_prediction", fake_prediction)
+    monkeypatch.setattr(yolo_client, "get_yolo_prediction_details", fake_details)
+
+    image_token = request_context.current_image_s3_key.set(
+        "chats/chat-1/image-1/original/image.png"
+    )
+    detection_token = request_context.current_detection_objects.set(None)
+    try:
+        result = run_async(yolo_client.detect_objects.ainvoke, {})
+    finally:
+        request_context.current_detection_objects.reset(detection_token)
+        request_context.current_image_s3_key.reset(image_token)
+
+    data = json.loads(result)
+    assert data["prediction_uid"] == "prediction-1"
+    assert data["detection_objects"] == detections
+
+
+def test_validate_active_image_key_rejects_a_different_chat(agent_components):
+    with pytest.raises(HTTPException) as exc:
+        agent_components.storage.validate_active_image_key(
+            "chat-1",
+            "chats/chat-2/image-1/processed/id/blur.png",
+        )
+
+    assert exc.value.status_code == 400
+
+
+def test_upload_image_with_invalid_data_returns_safe_error(
+    agent_components,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        agent_components.config,
+        "AWS_S3_BUCKET",
+        "polyai-images",
+    )
 
     with pytest.raises(HTTPException) as exc:
-        agent_module.upload_image_base64_to_s3("not-base64", "chat-123")
+        agent_components.storage.upload_image_base64_to_s3(
+            "not-base64",
+            "chat-1",
+        )
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "Invalid image data"
-
-
-def test_fetch_s3_image_returns_base64_for_frontend(agent_module, monkeypatch):
-    fake_s3_client = FakeS3Client()
-    monkeypatch.setattr(agent_module, "AWS_S3_BUCKET", "polyai-images")
-    monkeypatch.setattr(agent_module, "get_s3_client", lambda: fake_s3_client)
-
-    result = agent_module.fetch_s3_image_b64(
-        "chats/chat-123/image-123/predicted/image.jpg"
-    )
-
-    expected = base64.b64encode(b"annotated image bytes").decode("utf-8")
-    assert result == expected
-    assert fake_s3_client.bucket == "polyai-images"
-    assert fake_s3_client.key == "chats/chat-123/image-123/predicted/image.jpg"

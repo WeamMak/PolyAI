@@ -13,7 +13,10 @@ export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [imageB64, setImageB64] = useState<string | null>(null);
+  const [imageMediaType, setImageMediaType] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [activeImageS3Key, setActiveImageS3Key] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -30,6 +33,7 @@ export default function Chat() {
 
     if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
       setImageB64(null);
+      setImageMediaType(null);
       setImagePreview(null);
       toast.error("Please choose a JPEG or PNG image.");
       e.target.value = "";
@@ -40,6 +44,7 @@ export default function Chat() {
     reader.onload = () => {
       const result = reader.result as string;
       setImageB64(result.split(",")[1]);
+      setImageMediaType(file.type);
       setImagePreview(result);
     };
     reader.readAsDataURL(file);
@@ -60,18 +65,22 @@ export default function Chat() {
       role: "user",
       content: input.trim() || "What's in this image?",
       ...(imageB64 ? { image_base64: imageB64 } : {}),
+      ...(imageMediaType ? { image_media_type: imageMediaType } : {}),
     };
 
     const next = [...messages, userMessage];
     setMessages(next);
     setInput("");
     setImageB64(null);
+    setImageMediaType(null);
     setImagePreview(null);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setLoading(true);
 
     try {
-      const reply = await sendMessage(next);
+      const reply = await sendMessage(next, chatId, activeImageS3Key);
+      setChatId(reply.chat_id);
+      setActiveImageS3Key(reply.active_image_s3_key);
       setMessages([
         ...next,
         {
@@ -79,6 +88,7 @@ export default function Chat() {
           content: reply.response,
           prediction_id: reply.prediction_id,
           annotated_image: reply.annotated_image,
+          annotated_image_media_type: reply.annotated_image_media_type,
         },
       ]);
     } catch (err) {
@@ -141,6 +151,7 @@ export default function Chat() {
             <button
               onClick={() => {
                 setImageB64(null);
+                setImageMediaType(null);
                 setImagePreview(null);
               }}
               className="absolute -top-2 -right-2 bg-background border rounded-full p-0.5 hover:bg-muted"

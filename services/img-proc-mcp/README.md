@@ -43,12 +43,32 @@ tests/outputs/
 ## Tools
 
 Each tool accepts a base64-encoded image and returns a base64-encoded PNG.
+For object-specific edits, the tool also accepts YOLO detection objects plus
+`label`, `ordinal`, and `from_side`. Object matching, cropping, and composition
+all happen inside this service.
 
 | Tool | Description |
 |---|---|
-| `rotate(image_b64, angle, expand=True)` | Rotate the image by an angle in degrees. |
-| `flip(image_b64, direction="horizontal")` | Flip the image horizontally or vertically. |
-| `blur(image_b64, radius=2.0)` | Apply Gaussian blur. |
-| `resize(image_b64, width, height)` | Resize to the given width and height. |
-| `crop(image_b64, left, top, right, bottom)` | Crop a rectangular region. |
-| `add_noise(image_b64, amount=0.02, salt_vs_pepper=0.5)` | Add salt-and-pepper noise. |
+| `rotate` | Rotate the entire image or a selected detected object. |
+| `flip` | Flip the entire image or a selected detected object. |
+| `blur` | Blur the entire image or a selected detected object. |
+| `resize` | Resize the entire image or return a selected object at the requested size. |
+| `crop` | Crop the image or a region relative to a selected object. |
+| `add_noise` | Add salt-and-pepper noise to the image or a selected object. |
+
+The standard Streamable HTTP MCP endpoint is:
+
+```text
+http://localhost:8090/mcp
+```
+
+## Debug Object Selection
+
+To see how object-specific edits choose a detection, set:
+
+```bash
+DEBUG_OBJECT_SELECTION=1
+```
+
+The MCP logs `label`, `ordinal`, `from_side`, sorted candidate boxes, centers,
+areas, scores, and the selected box. It does not log image bytes.
