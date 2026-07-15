@@ -23,6 +23,9 @@ jobs:
           - service: frontend
             image: frontend-service
             context: services/frontend
+          - service: img-proc-mcp
+            image: img-proc-mcp-service
+            context: services/img-proc-mcp
 
     steps:
       - name: Checkout

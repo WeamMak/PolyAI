@@ -20,8 +20,10 @@ services:
       - ./services/agent/.env
     environment:
       YOLO_SERVICE_URL: http://yolo:8080
+      IMG_PROC_MCP_URL: http://img-proc-mcp:8090
     depends_on:
       - yolo
+      - img-proc-mcp
     networks:
       - polyai-net
 
@@ -32,6 +34,18 @@ services:
       - "8080:8080"
     env_file:
       - ./services/yolo/.env
+    networks:
+      - polyai-net
+
+  img-proc-mcp:
+    image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/img-proc-mcp-service:${IMG_PROC_MCP_IMAGE_TAG:-0.0.1}
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8090
     networks:
       - polyai-net
 

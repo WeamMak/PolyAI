@@ -7,12 +7,14 @@ services/
   frontend/  Next.js chat UI
   agent/     FastAPI + LangChain agent with a manual tool-calling loop
   yolo/      FastAPI YOLO object-detection service
+  img-proc-mcp/  MCP image-processing tools
 ```
 
 The full Docker Compose stack runs:
 
 ```text
 frontend -> agent -> yolo
+agent -> img-proc-mcp
 prometheus -> yolo metrics
 grafana -> prometheus
 ```
@@ -34,6 +36,7 @@ DOCKERHUB_NAMESPACE=weammakhoul
 YOLO_IMAGE_TAG=0.0.1
 AGENT_IMAGE_TAG=0.0.1
 FRONTEND_IMAGE_TAG=0.0.1
+IMG_PROC_MCP_IMAGE_TAG=0.0.1
 NEXT_PUBLIC_AGENT_URL=http://localhost:8000
 ```
 
@@ -88,6 +91,7 @@ Open:
 Frontend:   http://localhost:3000
 Agent:      http://localhost:8000
 YOLO:       http://localhost:8080
+Img Proc:   http://localhost:8090
 Prometheus: http://localhost:9090
 Grafana:    http://localhost:3001
 ```
@@ -142,6 +146,7 @@ DOCKERHUB_NAMESPACE=weammakhoul
 YOLO_IMAGE_TAG=0.0.1
 AGENT_IMAGE_TAG=0.0.1
 FRONTEND_IMAGE_TAG=0.0.1
+IMG_PROC_MCP_IMAGE_TAG=0.0.1
 NEXT_PUBLIC_AGENT_URL=http://dev.weam.fursa.click:8000
 ```
 

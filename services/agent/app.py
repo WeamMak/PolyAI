@@ -1,5 +1,6 @@
 import base64
 import binascii
+import io
 import json
 import logging
 import math
@@ -25,6 +26,7 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.rate_limiters import InMemoryRateLimiter
@@ -32,6 +34,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 YOLO_SERVICE_URL = os.environ.get("YOLO_SERVICE_URL", "http://localhost:8080")
+IMG_PROC_MCP_URL = os.environ.get("IMG_PROC_MCP_URL", "http://localhost:8090")
 AWS_REGION = os.environ.get(
     "AWS_REGION",
     os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
@@ -71,6 +74,13 @@ if BEDROCK_MODEL_ID not in ALLOWED_BEDROCK_MODEL_IDS:
 SYSTEM_PROMPT = (
     "You are an AI vision assistant. You help users understand and analyze images. "
     "Use the available tools to extract information from images. "
+    "When the user asks to transform an image, call process_image. "
+    "Supported image operations are rotate, flip, blur, resize, crop, and add_noise. "
+    "Use add_noise for salt-and-pepper noise requests. "
+    "Do not include markdown image placeholders; the frontend displays returned images separately. "
+    "For object-specific requests like 'the second dog from the right', pass "
+    "target='object', the object label, ordinal number, and from_side. "
+    "Never ask the model to inspect image bytes directly; use tools instead. "
 )
 
 REQUIRED_MODEL_FEATURES = ["structured_output", "tool_calling"]
@@ -152,13 +162,78 @@ def upload_image_base64_to_s3(image_b64: str, chat_id: str) -> str:
     return image_s3_key
 
 
-@tool
-def detect_objects() -> str:
-    """Detect and identify objects in the image provided by the user using YOLO object detection."""
-    image_s3_key = _current_image_s3_key.get()
-    if not image_s3_key:
-        return json.dumps({"error": "No image was provided by the user."})
+def read_s3_image_bytes(image_s3_key: str) -> bytes:
+    if not AWS_S3_BUCKET:
+        logging.error("AWS_S3_BUCKET is not configured")
+        raise HTTPException(status_code=500, detail="Image read is currently unavailable")
 
+    try:
+        response = get_s3_client().get_object(
+            Bucket=AWS_S3_BUCKET,
+            Key=image_s3_key,
+        )
+        return response["Body"].read()
+    except (BotoCoreError, ClientError):
+        logging.exception("Could not read image from S3: %s", image_s3_key)
+        raise HTTPException(status_code=502, detail="Could not read image from S3")
+
+
+def upload_image_bytes_to_s3(
+    image_bytes: bytes,
+    image_s3_key: str,
+    content_type: str,
+) -> None:
+    if not AWS_S3_BUCKET:
+        logging.error("AWS_S3_BUCKET is not configured")
+        raise HTTPException(status_code=500, detail="Image upload is currently unavailable")
+
+    try:
+        get_s3_client().put_object(
+            Bucket=AWS_S3_BUCKET,
+            Key=image_s3_key,
+            Body=image_bytes,
+            ContentType=content_type,
+        )
+    except (BotoCoreError, ClientError):
+        logging.exception("Could not upload processed image to S3")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not upload processed image to S3",
+        )
+
+
+def build_processed_image_s3_key(original_image_s3_key: str, operation: str) -> str:
+    safe_operation = operation.replace(" ", "-").replace("_", "-")
+
+    if "/original/" in original_image_s3_key:
+        image_prefix = original_image_s3_key.split("/original/", 1)[0]
+        return f"{image_prefix}/processed/{uuid.uuid4()}/{safe_operation}.png"
+
+    return f"processed/{uuid.uuid4()}/{safe_operation}.png"
+
+
+def image_bytes_to_base64(image_bytes: bytes) -> str:
+    return base64.b64encode(image_bytes).decode("utf-8")
+
+
+def image_to_png_base64(img: Image.Image) -> str:
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return image_bytes_to_base64(buffer.getvalue())
+
+
+def base64_to_image(image_b64: str) -> Image.Image:
+    image_bytes = base64.b64decode(image_b64)
+    return Image.open(io.BytesIO(image_bytes))
+
+
+def image_to_png_bytes(img: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def request_yolo_prediction(image_s3_key: str) -> dict:
     with httpx.Client(timeout=30.0) as client:
         response = client.post(
             f"{YOLO_SERVICE_URL}/predict",
@@ -166,7 +241,422 @@ def detect_objects() -> str:
         )
         response.raise_for_status()
 
-    return json.dumps(response.json())
+    return response.json()
+
+
+def get_yolo_prediction_details(prediction_uid: str) -> dict:
+    with httpx.Client(timeout=30.0) as client:
+        response = client.get(f"{YOLO_SERVICE_URL}/prediction/{prediction_uid}")
+        response.raise_for_status()
+
+    return response.json()
+
+
+@tool
+def detect_objects() -> str:
+    """Detect and identify objects in the image provided by the user using YOLO object detection."""
+    image_s3_key = _current_image_s3_key.get()
+    if not image_s3_key:
+        return json.dumps({"error": "No image was provided by the user."})
+
+    return json.dumps(request_yolo_prediction(image_s3_key))
+
+
+def normalize_operation(operation: str) -> str:
+    normalized = operation.strip().lower().replace("-", "_")
+    operation_aliases = {
+        "noise": "add_noise",
+        "salt_pepper_noise": "add_noise",
+        "salt_and_pepper_noise": "add_noise",
+    }
+
+    normalized = operation_aliases.get(normalized, normalized)
+    allowed_operations = {"rotate", "flip", "blur", "resize", "crop", "add_noise"}
+
+    if normalized not in allowed_operations:
+        raise ValueError(
+            "operation must be one of: rotate, flip, blur, resize, crop, add_noise"
+        )
+
+    return normalized
+
+
+def call_img_proc_mcp_tool(tool_name: str, arguments: dict) -> str:
+    with httpx.Client(timeout=60.0) as client:
+        response = client.post(
+            f"{IMG_PROC_MCP_URL.rstrip('/')}/tools/call",
+            json={"name": tool_name, "arguments": arguments},
+        )
+        response.raise_for_status()
+
+    data = response.json()
+    if data.get("error"):
+        raise ValueError(data["error"])
+
+    result = data.get("result")
+    if not isinstance(result, str):
+        raise ValueError("Image processing MCP server returned an invalid result")
+
+    return result
+
+
+def build_img_proc_arguments(
+    operation: str,
+    image_b64: str,
+    target: str,
+    angle: float,
+    expand: bool,
+    direction: str,
+    radius: float,
+    width: Optional[int],
+    height: Optional[int],
+    left: Optional[int],
+    top: Optional[int],
+    right: Optional[int],
+    bottom: Optional[int],
+    amount: float,
+    salt_vs_pepper: float,
+) -> dict:
+    arguments = {"image_b64": image_b64}
+
+    if operation == "rotate":
+        arguments["angle"] = angle
+        arguments["expand"] = expand if target != "object" else False
+    elif operation == "flip":
+        arguments["direction"] = direction
+    elif operation == "blur":
+        arguments["radius"] = radius
+    elif operation == "resize":
+        if width is None or height is None:
+            raise ValueError("resize requires width and height")
+        arguments["width"] = width
+        arguments["height"] = height
+    elif operation == "crop":
+        if left is None or top is None or right is None or bottom is None:
+            raise ValueError("crop requires left, top, right, and bottom")
+        arguments["left"] = left
+        arguments["top"] = top
+        arguments["right"] = right
+        arguments["bottom"] = bottom
+    elif operation == "add_noise":
+        arguments["amount"] = amount
+        arguments["salt_vs_pepper"] = salt_vs_pepper
+
+    return arguments
+
+
+def call_image_operation(
+    operation: str,
+    image_b64: str,
+    target: str,
+    angle: float,
+    expand: bool,
+    direction: str,
+    radius: float,
+    width: Optional[int],
+    height: Optional[int],
+    left: Optional[int],
+    top: Optional[int],
+    right: Optional[int],
+    bottom: Optional[int],
+    amount: float,
+    salt_vs_pepper: float,
+) -> str:
+    arguments = build_img_proc_arguments(
+        operation,
+        image_b64,
+        target,
+        angle,
+        expand,
+        direction,
+        radius,
+        width,
+        height,
+        left,
+        top,
+        right,
+        bottom,
+        amount,
+        salt_vs_pepper,
+    )
+    return call_img_proc_mcp_tool(operation, arguments)
+
+
+def parse_detection_box(raw_box) -> tuple[int, int, int, int]:
+    if isinstance(raw_box, str):
+        values = json.loads(raw_box)
+    else:
+        values = raw_box
+
+    if not isinstance(values, list) or len(values) != 4:
+        raise ValueError("YOLO returned an invalid bounding box")
+
+    left, top, right, bottom = values
+    return (
+        int(round(left)),
+        int(round(top)),
+        int(round(right)),
+        int(round(bottom)),
+    )
+
+
+def clamp_box_to_image(
+    box: tuple[int, int, int, int],
+    img: Image.Image,
+) -> tuple[int, int, int, int]:
+    left, top, right, bottom = box
+    left = max(0, min(left, img.width - 1))
+    top = max(0, min(top, img.height - 1))
+    right = max(left + 1, min(right, img.width))
+    bottom = max(top + 1, min(bottom, img.height))
+    return left, top, right, bottom
+
+
+def detection_center(detection: dict) -> tuple[float, float]:
+    left, top, right, bottom = detection["box"]
+    return ((left + right) / 2, (top + bottom) / 2)
+
+
+def select_detection_object(
+    detection_objects: list[dict],
+    label: str,
+    ordinal: int,
+    from_side: str,
+    img: Image.Image,
+) -> dict:
+    if ordinal < 1:
+        raise ValueError("ordinal must be 1 or greater")
+
+    label_lower = label.lower()
+    matches = []
+
+    for detection in detection_objects:
+        if detection.get("label", "").lower() != label_lower:
+            continue
+
+        detection_copy = dict(detection)
+        detection_copy["box"] = clamp_box_to_image(
+            parse_detection_box(detection["box"]),
+            img,
+        )
+        matches.append(detection_copy)
+
+    if not matches:
+        raise ValueError(f"No detected object matched label '{label}'")
+
+    from_side = from_side.lower().replace("-", "_")
+    if from_side == "right":
+        matches.sort(key=lambda item: detection_center(item)[0], reverse=True)
+    elif from_side == "left":
+        matches.sort(key=lambda item: detection_center(item)[0])
+    elif from_side == "bottom":
+        matches.sort(key=lambda item: detection_center(item)[1], reverse=True)
+    elif from_side == "top":
+        matches.sort(key=lambda item: detection_center(item)[1])
+    else:
+        raise ValueError("from_side must be left, right, top, or bottom")
+
+    if ordinal > len(matches):
+        raise ValueError(
+            f"Only {len(matches)} detected object(s) matched label '{label}'"
+        )
+
+    return matches[ordinal - 1]
+
+
+def process_entire_image(
+    original_image_bytes: bytes,
+    operation: str,
+    angle: float,
+    expand: bool,
+    direction: str,
+    radius: float,
+    width: Optional[int],
+    height: Optional[int],
+    left: Optional[int],
+    top: Optional[int],
+    right: Optional[int],
+    bottom: Optional[int],
+    amount: float,
+    salt_vs_pepper: float,
+) -> bytes:
+    image_b64 = image_bytes_to_base64(original_image_bytes)
+    processed_image_b64 = call_image_operation(
+        operation,
+        image_b64,
+        "entire_image",
+        angle,
+        expand,
+        direction,
+        radius,
+        width,
+        height,
+        left,
+        top,
+        right,
+        bottom,
+        amount,
+        salt_vs_pepper,
+    )
+    return base64.b64decode(processed_image_b64)
+
+
+def process_object_region(
+    original_img: Image.Image,
+    selected_object: dict,
+    operation: str,
+    angle: float,
+    direction: str,
+    radius: float,
+    width: Optional[int],
+    height: Optional[int],
+    amount: float,
+    salt_vs_pepper: float,
+) -> bytes:
+    full_img = original_img.convert("RGBA")
+    box = selected_object["box"]
+    crop_img = full_img.crop(box)
+    crop_b64 = image_to_png_base64(crop_img)
+
+    processed_crop_b64 = call_image_operation(
+        operation,
+        crop_b64,
+        "object",
+        angle,
+        False,
+        direction,
+        radius,
+        width,
+        height,
+        None,
+        None,
+        None,
+        None,
+        amount,
+        salt_vs_pepper,
+    )
+
+    processed_crop = base64_to_image(processed_crop_b64).convert("RGBA")
+
+    if processed_crop.size != crop_img.size:
+        processed_crop = processed_crop.resize(crop_img.size)
+
+    full_img.paste(processed_crop, box)
+    return image_to_png_bytes(full_img)
+
+
+@tool
+def process_image(
+    operation: str,
+    target: str = "entire_image",
+    label: Optional[str] = None,
+    ordinal: int = 1,
+    from_side: str = "left",
+    angle: float = 90.0,
+    expand: bool = True,
+    direction: str = "horizontal",
+    radius: float = 2.0,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    left: Optional[int] = None,
+    top: Optional[int] = None,
+    right: Optional[int] = None,
+    bottom: Optional[int] = None,
+    amount: float = 0.02,
+    salt_vs_pepper: float = 0.5,
+) -> str:
+    """
+    Transform the uploaded image.
+
+    Use target='entire_image' for full-image edits. Use target='object' for
+    object-specific edits after extracting a YOLO bounding box. For object
+    targets, provide label, ordinal, and from_side. Example: the second dog
+    from the right means label='dog', ordinal=2, from_side='right'.
+    """
+    image_s3_key = _current_image_s3_key.get()
+    if not image_s3_key:
+        return json.dumps({"error": "No image was provided by the user."})
+
+    try:
+        operation = normalize_operation(operation)
+        target = target.strip().lower()
+        original_image_bytes = read_s3_image_bytes(image_s3_key)
+        original_img = Image.open(io.BytesIO(original_image_bytes))
+        prediction_uid = None
+        selected_object = None
+
+        if target in ["entire_image", "image", "all"]:
+            processed_image_bytes = process_entire_image(
+                original_image_bytes,
+                operation,
+                angle,
+                expand,
+                direction,
+                radius,
+                width,
+                height,
+                left,
+                top,
+                right,
+                bottom,
+                amount,
+                salt_vs_pepper,
+            )
+        elif target in ["object", "region"]:
+            if not label:
+                raise ValueError("object-specific edits require a label")
+
+            prediction = request_yolo_prediction(image_s3_key)
+            prediction_uid = prediction["prediction_uid"]
+            prediction_details = get_yolo_prediction_details(prediction_uid)
+            selected_object = select_detection_object(
+                prediction_details["detection_objects"],
+                label,
+                ordinal,
+                from_side,
+                original_img,
+            )
+
+            if operation == "crop":
+                processed_image_bytes = image_to_png_bytes(
+                    original_img.convert("RGBA").crop(selected_object["box"])
+                )
+            else:
+                processed_image_bytes = process_object_region(
+                    original_img,
+                    selected_object,
+                    operation,
+                    angle,
+                    direction,
+                    radius,
+                    width,
+                    height,
+                    amount,
+                    salt_vs_pepper,
+                )
+        else:
+            raise ValueError("target must be 'entire_image' or 'object'")
+
+        processed_s3_key = build_processed_image_s3_key(image_s3_key, operation)
+        upload_image_bytes_to_s3(
+            processed_image_bytes,
+            processed_s3_key,
+            "image/png",
+        )
+
+        return json.dumps(
+            {
+                "operation": operation,
+                "target": target,
+                "prediction_uid": prediction_uid,
+                "processed_image_s3_key": processed_s3_key,
+                "selected_object": selected_object,
+                "message": "Image processing completed.",
+            }
+        )
+    except Exception as exc:
+        logging.exception("Could not process image")
+        return json.dumps({"error": str(exc)})
 
 
 def fetch_s3_image_b64(image_s3_key: str) -> Optional[str]:
@@ -195,7 +685,8 @@ def fetch_s3_image_b64(image_s3_key: str) -> Optional[str]:
 
 # Registry: map tool name -> tool function
 TOOLS = {
-    detect_objects.name: detect_objects
+    detect_objects.name: detect_objects,
+    process_image.name: process_image,
 }
 
 def validate_model_profile(model_name: Optional[str], profile: dict):
@@ -378,6 +869,10 @@ def run_agent(history: list, max_iterations: int = 10) -> AgentRunResult:
                 if tool_data.get("predicted_image_s3_key"):
                     annotated_image = fetch_s3_image_b64(
                         tool_data["predicted_image_s3_key"]
+                    )
+                if tool_data.get("processed_image_s3_key"):
+                    annotated_image = fetch_s3_image_b64(
+                        tool_data["processed_image_s3_key"]
                     )
             except json.JSONDecodeError:
                 pass
