@@ -299,3 +299,18 @@ def test_app_no_longer_uses_old_database_helpers():
 
 def test_health():
     assert health() == {"status": "ok"}
+
+
+def test_ready_when_service_is_accepting_requests(monkeypatch):
+    monkeypatch.setattr(yolo_app, "is_shutting_down", False)
+
+    assert yolo_app.ready() == {"status": "ready"}
+
+
+def test_ready_returns_503_during_shutdown(monkeypatch):
+    monkeypatch.setattr(yolo_app, "is_shutting_down", True)
+
+    with pytest.raises(HTTPException) as error:
+        yolo_app.ready()
+
+    assert_http_error(error, 503, "Service is shutting down")

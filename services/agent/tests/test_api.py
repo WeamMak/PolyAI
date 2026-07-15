@@ -1,15 +1,17 @@
+import asyncio
 import sys
 
 import pytest
 from fastapi.testclient import TestClient
 
 
-pytestmark = pytest.mark.skipif(
+skip_if_testclient_hangs = pytest.mark.skipif(
     sys.version_info >= (3, 14),
     reason="FastAPI TestClient hangs in the local Python 3.14 environment.",
 )
 
 
+@skip_if_testclient_hangs
 def test_health_endpoint(agent_module, monkeypatch):
     async def skip_mcp_startup():
         return None
@@ -17,12 +19,61 @@ def test_health_endpoint(agent_module, monkeypatch):
     monkeypatch.setattr(agent_module, "initialize_agent_tools", skip_mcp_startup)
 
     with TestClient(agent_module.app) as client:
+        agent_module.app.state.ready = False
         response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
+def test_ready_endpoint_follows_application_lifecycle(
+    agent_module,
+    monkeypatch,
+):
+    async def skip_mcp_startup():
+        return None
+
+    monkeypatch.setattr(agent_module, "initialize_agent_tools", skip_mcp_startup)
+
+    async def check_lifecycle():
+        assert agent_module.app.state.ready is False
+
+        async with agent_module.lifespan(agent_module.app):
+            assert agent_module.app.state.ready is True
+            assert agent_module.ready() == {"status": "ready"}
+
+        assert agent_module.app.state.ready is False
+
+    asyncio.run(check_lifecycle())
+
+
+def test_ready_endpoint_returns_503_when_not_ready(agent_module):
+    agent_module.app.state.ready = False
+
+    with pytest.raises(agent_module.HTTPException) as error:
+        agent_module.ready()
+
+    assert error.value.status_code == 503
+    assert error.value.detail == "Service is not ready"
+
+
+@skip_if_testclient_hangs
+def test_ready_endpoint_http_response(agent_module, monkeypatch):
+    async def skip_mcp_startup():
+        return None
+
+    monkeypatch.setattr(agent_module, "initialize_agent_tools", skip_mcp_startup)
+
+    with TestClient(agent_module.app) as client:
+        assert agent_module.app.state.ready is True
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+    assert agent_module.app.state.ready is False
+
+
+@skip_if_testclient_hangs
 def test_chat_keeps_latest_processed_image_for_follow_up(
     agent_module,
     monkeypatch,
