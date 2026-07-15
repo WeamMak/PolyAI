@@ -4,14 +4,17 @@ kind: Kustomization
 resources:
   - yolo-config.yaml
   - yolo-deployment.yaml
+  - yolo-hpa.yaml
   - yolo-service.yaml
   - img-proc-mcp-config.yaml
   - img-proc-mcp-deployment.yaml
   - img-proc-mcp-service.yaml
   - agent-config.yaml
   - agent-deployment.yaml
+  - agent-hpa.yaml
   - agent-service.yaml
   - frontend-deployment.yaml
+  - frontend-hpa.yaml
   - frontend-service.yaml
   - prometheus-rbac.yaml
   - prometheus-config.yaml
