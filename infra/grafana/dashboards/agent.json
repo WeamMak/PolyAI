@@ -11,7 +11,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "fieldConfig": {
         "defaults": {
@@ -85,7 +85,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "sum by (status) (rate(agent_chat_requests_total[1m])) * 60",
@@ -100,7 +100,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "fieldConfig": {
         "defaults": {
@@ -174,7 +174,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.50, sum by (le) (rate(agent_chat_request_duration_seconds_bucket[5m])))",
@@ -185,7 +185,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_chat_request_duration_seconds_bucket[5m])))",
@@ -196,7 +196,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "histogram_quantile(0.99, sum by (le) (rate(agent_chat_request_duration_seconds_bucket[5m])))",
@@ -211,7 +211,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "fieldConfig": {
         "defaults": {
@@ -292,7 +292,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "100 * sum(rate(agent_chat_requests_total{status=\"error\"}[5m])) / sum(rate(agent_chat_requests_total[5m]))",
@@ -307,7 +307,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "fieldConfig": {
         "defaults": {
@@ -381,7 +381,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "sum(rate(agent_input_tokens_total[5m])) * 60",
@@ -392,7 +392,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "sum(rate(agent_output_tokens_total[5m])) * 60",
@@ -412,7 +412,22 @@
     "prometheus"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
   },
   "time": {
     "from": "now-1h",

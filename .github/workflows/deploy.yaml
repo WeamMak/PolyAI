@@ -161,7 +161,9 @@ jobs:
           host: dev.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
-          script: mkdir -p ${{ env.STACK_DIR }}
+          script: |
+            mkdir -p ${{ env.STACK_DIR }}
+            rm -f ${{ env.STACK_DIR }}/infra/grafana/provisioning/datasources/prometheus.yml
 
       - name: Copy compose files
         uses: appleboy/scp-action@v0.1.7
@@ -237,7 +239,9 @@ jobs:
           host: prod.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
-          script: mkdir -p ${{ env.STACK_DIR }}
+          script: |
+            mkdir -p ${{ env.STACK_DIR }}
+            rm -f ${{ env.STACK_DIR }}/infra/grafana/provisioning/datasources/prometheus.yml
 
       - name: Copy compose files
         uses: appleboy/scp-action@v0.1.7
