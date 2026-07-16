@@ -58,7 +58,7 @@ jobs:
               services/img-proc-mcp/*)
                 img_proc_mcp=true
                 ;;
-              docker-compose.yml|docker-compose.yaml|prometheus.yml|fluent-bit.conf|.github/workflows/deploy.yaml)
+              docker-compose.yml|docker-compose.yaml|prometheus.yml|fluent-bit.conf|infra/grafana/*|.github/workflows/deploy.yaml)
                 stack=true
                 ;;
             esac
@@ -169,7 +169,7 @@ jobs:
           host: dev.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
-          source: "docker-compose.yml,prometheus.yml,fluent-bit.conf"
+          source: "docker-compose.yml,prometheus.yml,fluent-bit.conf,infra/grafana"
           target: ${{ env.STACK_DIR }}
 
       - name: Deploy stack
@@ -245,7 +245,7 @@ jobs:
           host: prod.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
-          source: "docker-compose.yml,prometheus.yml,fluent-bit.conf"
+          source: "docker-compose.yml,prometheus.yml,fluent-bit.conf,infra/grafana"
           target: ${{ env.STACK_DIR }}
 
       - name: Deploy stack
