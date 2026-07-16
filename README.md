@@ -8,6 +8,7 @@ services/
   agent/     FastAPI + LangChain agent with a manual tool-calling loop
   yolo/      FastAPI YOLO object-detection service
   img-proc-mcp/  MCP image-processing tools
+  observability-mcp/  Local MCP tools for S3 logs and Prometheus metrics
 ```
 
 The full Docker Compose stack runs:
@@ -188,25 +189,18 @@ The Compose services use `restart: unless-stopped`, so containers should come ba
 ### EC2 Container Logs
 
 The EC2 Compose stack runs Fluent Bit to collect Docker JSON logs and upload
-gzip-compressed batches to `s3://weam-polyai-logs/logs/` in `us-east-1`.
+gzip-compressed batches to `s3://weam-polyai-logs-dev/logs/` for dev and
+`s3://weam-polyai-logs-prod/logs/` for prod in `us-east-1`.
 This collector is for the old EC2 deployment only; it is not part of the
 Kubernetes deployment.
 
 The S3 bucket should remain private and have an enabled lifecycle rule named
 `delete-logs-after-90-days` that expires all objects 90 days after creation.
-The EC2 instance role needs this permission:
+Each EC2 instance role needs `s3:PutObject` only for its own log prefix:
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::weam-polyai-logs/logs/*"
-    }
-  ]
-}
+```text
+Dev:  arn:aws:s3:::weam-polyai-logs-dev/logs/*
+Prod: arn:aws:s3:::weam-polyai-logs-prod/logs/*
 ```
 
 After deployment, check the collector and its uploads with:

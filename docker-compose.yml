@@ -10,6 +10,12 @@ services:
       - agent
     networks:
       - polyai-net
+    logging:
+      driver: json-file
+      options:
+        labels: com.docker.compose.service
+        max-size: "10m"
+        max-file: "3"
 
   agent:
     image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/agent-service:${AGENT_IMAGE_TAG:-0.0.1}
@@ -26,6 +32,12 @@ services:
       - img-proc-mcp
     networks:
       - polyai-net
+    logging:
+      driver: json-file
+      options:
+        labels: com.docker.compose.service
+        max-size: "10m"
+        max-file: "3"
 
   yolo:
     image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/yolo-service:${YOLO_IMAGE_TAG:-0.0.1}
@@ -36,6 +48,12 @@ services:
       - ./services/yolo/.env
     networks:
       - polyai-net
+    logging:
+      driver: json-file
+      options:
+        labels: com.docker.compose.service
+        max-size: "10m"
+        max-file: "3"
 
   img-proc-mcp:
     image: ${DOCKERHUB_NAMESPACE:-weammakhoul}/img-proc-mcp-service:${IMG_PROC_MCP_IMAGE_TAG:-0.0.1}
@@ -49,6 +67,12 @@ services:
       DEBUG_OBJECT_SELECTION: ${DEBUG_OBJECT_SELECTION:-0}
     networks:
       - polyai-net
+    logging:
+      driver: json-file
+      options:
+        labels: com.docker.compose.service
+        max-size: "10m"
+        max-file: "3"
 
   node-exporter:
     image: prom/node-exporter:v1.10.2
@@ -60,6 +84,12 @@ services:
       - "--collector.processes"
     volumes:
       - "/:/host:ro,rslave"
+    logging:
+      driver: json-file
+      options:
+        labels: com.docker.compose.service
+        max-size: "10m"
+        max-file: "3"
 
   prometheus:
     image: prom/prometheus
@@ -77,6 +107,12 @@ services:
     networks:
       - monitoring-net
       - polyai-net
+    logging:
+      driver: json-file
+      options:
+        labels: com.docker.compose.service
+        max-size: "10m"
+        max-file: "3"
 
   grafana:
     image: grafana/grafana
@@ -89,14 +125,30 @@ services:
       - prometheus
     networks:
       - monitoring-net
+    logging:
+      driver: json-file
+      options:
+        labels: com.docker.compose.service
+        max-size: "10m"
+        max-file: "3"
 
   fluent-bit:
     image: fluent/fluent-bit:4.2.7
     restart: unless-stopped
+    environment:
+      FLUENT_BIT_S3_BUCKET: ${FLUENT_BIT_S3_BUCKET:-weam-polyai-logs-dev}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      HOSTNAME: ${HOSTNAME:-unknown-host}
     volumes:
       - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/log:/var/log
+    logging:
+      driver: json-file
+      options:
+        labels: com.docker.compose.service
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   polyai-net:
