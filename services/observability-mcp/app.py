@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -16,6 +17,10 @@ MAX_LOG_RESULTS = 200
 MAX_S3_OBJECTS = 500
 S3_UPLOAD_BUFFER = timedelta(minutes=5)
 HTTP_TIMEOUT_SECONDS = 10
+ENVIRONMENT_MATCHER = re.compile(
+    r'(?P<before>,\s*)?environment\s*=\s*"(?:dev|prod)"'
+    r'(?P<after>\s*,)?'
+)
 
 ENVIRONMENTS = {
     "dev": {
@@ -247,6 +252,42 @@ def _prometheus_step(start: datetime, end: datetime) -> int:
     return 300
 
 
+def _without_environment_matcher(query: str) -> str:
+    """Remove dev/prod environment matchers without breaking selectors."""
+
+    def remove_matcher(match: re.Match) -> str:
+        if match.group("before") and match.group("after"):
+            return ","
+        return ""
+
+    return ENVIRONMENT_MATCHER.sub(remove_matcher, query)
+
+
+def _prometheus_range_payload(
+    url: str,
+    query: str,
+    start: datetime,
+    end: datetime,
+) -> dict:
+    response = requests.get(
+        f"{url}/api/v1/query_range",
+        params={
+            "query": query,
+            "start": _utc_iso(start),
+            "end": _utc_iso(end),
+            "step": _prometheus_step(start, end),
+        },
+        timeout=HTTP_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("Prometheus returned an invalid response")
+    if payload.get("status") != "success":
+        raise ValueError(payload.get("error", "Prometheus returned an error"))
+    return payload
+
+
 @mcp.tool()
 def query_prometheus(
     query: str,
@@ -275,31 +316,41 @@ def query_prometheus(
         normalized_environment = environment.strip().lower()
         url = _prometheus_url(normalized_environment)
         start, end = _time_window(minutes, around_timestamp)
-        response = requests.get(
-            f"{url}/api/v1/query_range",
-            params={
-                "query": query.strip(),
-                "start": _utc_iso(start),
-                "end": _utc_iso(end),
-                "step": _prometheus_step(start, end),
-            },
-            timeout=HTTP_TIMEOUT_SECONDS,
+        requested_query = query.strip()
+        executed_query = requested_query
+        query_adjusted = False
+        payload = _prometheus_range_payload(
+            url,
+            executed_query,
+            start,
+            end,
         )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError("Prometheus returned an invalid response")
-        if payload.get("status") != "success":
-            raise ValueError(
-                payload.get("error", "Prometheus returned an error")
-            )
+
+        prometheus_data = payload.get("data", {})
+        if (
+            isinstance(prometheus_data, dict)
+            and prometheus_data.get("result") == []
+        ):
+            corrected_query = _without_environment_matcher(requested_query)
+            if corrected_query != requested_query:
+                executed_query = corrected_query
+                query_adjusted = True
+                payload = _prometheus_range_payload(
+                    url,
+                    executed_query,
+                    start,
+                    end,
+                )
 
         result = {
             "ok": True,
             "environment": normalized_environment,
             "start": _utc_iso(start),
             "end": _utc_iso(end),
-            "query": query.strip(),
+            "query": executed_query,
+            "requested_query": requested_query,
+            "executed_query": executed_query,
+            "query_adjusted": query_adjusted,
             "data": payload.get("data", {}),
             "warnings": payload.get("warnings", []),
         }

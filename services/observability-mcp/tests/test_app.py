@@ -176,13 +176,19 @@ def test_query_prometheus_returns_raw_data(monkeypatch):
     assert result["ok"] is True
     assert result["data"]["resultType"] == "matrix"
     assert "hint" not in result
+    assert result["query_adjusted"] is False
+    assert result["requested_query"] == result["executed_query"]
+    assert len(calls) == 1
     assert calls[0][0] == "http://prod.example:9090/api/v1/query_range"
     assert calls[0][1]["query"].startswith("rate(")
     assert calls[0][2] == 10
 
 
 def test_query_prometheus_explains_empty_results(monkeypatch):
+    calls = []
+
     def fake_get(url, params, timeout):
+        calls.append(params["query"])
         return FakeResponse(
             {
                 "status": "success",
@@ -200,8 +206,68 @@ def test_query_prometheus_explains_empty_results(monkeypatch):
     )
 
     assert result["ok"] is True
+    assert result["query_adjusted"] is True
+    assert len(calls) == 2
+    assert 'environment="dev"' in result["requested_query"]
+    assert "environment" not in result["executed_query"]
     assert "do not add an environment label" in result["hint"]
     assert 'job="node"' in result["hint"]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        (
+            'metric{environment="dev",mode="idle"}',
+            'metric{mode="idle"}',
+        ),
+        (
+            'metric{mode="idle",environment="prod",cpu="0"}',
+            'metric{mode="idle",cpu="0"}',
+        ),
+        (
+            'metric{mode="idle",environment="dev"}',
+            'metric{mode="idle"}',
+        ),
+        ('metric{environment="prod"}', "metric{}"),
+    ],
+)
+def test_without_environment_matcher_keeps_valid_promql(query, expected):
+    assert app._without_environment_matcher(query) == expected
+
+
+def test_query_prometheus_retries_with_corrected_query(monkeypatch):
+    calls = []
+
+    def fake_get(url, params, timeout):
+        calls.append(params["query"])
+        if len(calls) == 1:
+            result = []
+        else:
+            result = [{"metric": {"instance": "node"}, "values": []}]
+        return FakeResponse(
+            {
+                "status": "success",
+                "data": {"resultType": "matrix", "result": result},
+            }
+        )
+
+    monkeypatch.setattr(app.requests, "get", fake_get)
+
+    result = app.query_prometheus(
+        query=(
+            "100 - (avg(rate(node_cpu_seconds_total{"
+            'mode="idle",environment="prod"}[5m])) * 100)'
+        ),
+        environment="prod",
+    )
+
+    assert len(calls) == 2
+    assert 'environment="prod"' in calls[0]
+    assert "environment" not in calls[1]
+    assert result["query_adjusted"] is True
+    assert result["query"] == calls[1]
+    assert "hint" not in result
 
 
 def test_query_prometheus_returns_transport_error(monkeypatch):
