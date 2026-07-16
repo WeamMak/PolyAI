@@ -175,9 +175,33 @@ def test_query_prometheus_returns_raw_data(monkeypatch):
 
     assert result["ok"] is True
     assert result["data"]["resultType"] == "matrix"
+    assert "hint" not in result
     assert calls[0][0] == "http://prod.example:9090/api/v1/query_range"
     assert calls[0][1]["query"].startswith("rate(")
     assert calls[0][2] == 10
+
+
+def test_query_prometheus_explains_empty_results(monkeypatch):
+    def fake_get(url, params, timeout):
+        return FakeResponse(
+            {
+                "status": "success",
+                "data": {"resultType": "matrix", "result": []},
+            }
+        )
+
+    monkeypatch.setattr(app.requests, "get", fake_get)
+
+    result = app.query_prometheus(
+        query=(
+            'node_cpu_seconds_total{mode="idle",environment="dev"}'
+        ),
+        environment="dev",
+    )
+
+    assert result["ok"] is True
+    assert "do not add an environment label" in result["hint"]
+    assert 'job="node"' in result["hint"]
 
 
 def test_query_prometheus_returns_transport_error(monkeypatch):
@@ -213,3 +237,19 @@ def test_mcp_exposes_only_two_generic_tools():
         return [tool.name for tool in tools]
 
     assert anyio.run(tool_names) == ["get_logs", "query_prometheus"]
+
+
+def test_query_prometheus_tool_description_guides_copilot():
+    async def tool_description():
+        tools = await app.mcp.list_tools()
+        query_tool = next(
+            tool for tool in tools if tool.name == "query_prometheus"
+        )
+        return query_tool.description
+
+    description = anyio.run(tool_description)
+
+    assert "environment argument selects the Prometheus server" in description
+    assert "Do not add an" in description
+    assert 'environment label such as environment="dev"' in description
+    assert "node_cpu_seconds_total" in description

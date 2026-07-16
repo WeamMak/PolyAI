@@ -256,8 +256,17 @@ def query_prometheus(
 ) -> dict:
     """Run a read-only PromQL range query against dev or prod Prometheus.
 
-    Copilot should create the PromQL needed for CPU, request, latency, or 5xx
-    analysis and interpret the returned Prometheus data.
+    The environment argument selects the Prometheus server. Do not add an
+    environment label such as environment="dev" or environment="prod" to
+    PromQL because the collected metrics do not have that label.
+
+    Node-exporter metrics use job="node". For instance CPU usage, use:
+    100 - (avg by (instance) (rate(
+      node_cpu_seconds_total{job="node",mode="idle"}[5m]
+    )) * 100)
+
+    Copilot should create other PromQL expressions for request, latency, 5xx,
+    memory, or other analysis and interpret the returned Prometheus data.
     """
     try:
         if not isinstance(query, str) or not query.strip():
@@ -285,7 +294,7 @@ def query_prometheus(
                 payload.get("error", "Prometheus returned an error")
             )
 
-        return {
+        result = {
             "ok": True,
             "environment": normalized_environment,
             "start": _utc_iso(start),
@@ -294,6 +303,18 @@ def query_prometheus(
             "data": payload.get("data", {}),
             "warnings": payload.get("warnings", []),
         }
+        prometheus_data = result["data"]
+        if (
+            isinstance(prometheus_data, dict)
+            and prometheus_data.get("result") == []
+        ):
+            result["hint"] = (
+                "No matching series. The environment argument already "
+                "selects the Prometheus server, so do not add an "
+                "environment label to PromQL. Retry using labels that exist; "
+                'node-exporter metrics use job="node".'
+            )
+        return result
     except (ValueError, AttributeError, requests.RequestException) as exc:
         return _error(str(exc))
 
