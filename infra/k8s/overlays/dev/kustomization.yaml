@@ -11,7 +11,7 @@ resources:
 # Build and push these images before applying this overlay.
 images:
   - name: docker.io/weammakhoul/yolo-service
-    newTag: k8s-dev-2878d4344160915673a3bfe9fc2aa5303d787d35
+    newTag: k8s-dev-b519bcc0f47514fa2b5b3990dd93c879038f4540
   - name: docker.io/weammakhoul/agent-service
     newTag: k8s-dev-2878d4344160915673a3bfe9fc2aa5303d787d35
   - name: docker.io/weammakhoul/frontend-service
