@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yolo
+  labels:
+    app: yolo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: yolo
+  template:
+    metadata:
+      labels:
+        app: yolo
+    spec:
+      containers:
+        - name: yolo
+          image: docker.io/weammakhoul/yolo-service:dev-8b96f8b6cc2834a3dbeee2321d37599d79685aba
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_BACKEND
+              value: "sqlite"
+            - name: CONFIDENCE_THRESHOLD
+              value: "0.5"
+            - name: AWS_REGION
+              value: "us-east-1"
+            - name: AWS_S3_BUCKET
+              value: "weam-polyai-images"

@@ -59,11 +59,18 @@ async def initialize_agent_tools() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await initialize_agent_tools()
-    yield
+    app.state.ready = False
+
+    try:
+        await initialize_agent_tools()
+        app.state.ready = True
+        yield
+    finally:
+        app.state.ready = False
 
 
 app = FastAPI(title="Vision Agent", lifespan=lifespan)
+app.state.ready = False
 
 app.add_middleware(
     CORSMiddleware,
@@ -176,6 +183,14 @@ async def chat(request: ChatRequest):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready():
+    if not app.state.ready:
+        raise HTTPException(status_code=503, detail="Service is not ready")
+
+    return {"status": "ready"}
 
 
 if __name__ == "__main__":

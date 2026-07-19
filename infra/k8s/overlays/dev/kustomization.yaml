@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dev
+
+resources:
+  - ../../base
+  - namespace.yaml
+  - prometheus-pvc.yaml
+
+# Build and push these images before applying this overlay.
+images:
+  - name: docker.io/weammakhoul/yolo-service
+    newTag: k8s-dev-2878d4344160915673a3bfe9fc2aa5303d787d35
+  - name: docker.io/weammakhoul/agent-service
+    newTag: k8s-dev-2878d4344160915673a3bfe9fc2aa5303d787d35
+  - name: docker.io/weammakhoul/frontend-service
+    newTag: k8s-dev-2878d4344160915673a3bfe9fc2aa5303d787d35
+  - name: docker.io/weammakhoul/img-proc-mcp-service
+    newTag: k8s-dev-2878d4344160915673a3bfe9fc2aa5303d787d35

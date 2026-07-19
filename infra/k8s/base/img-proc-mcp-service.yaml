@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: img-proc-mcp-svc
+  labels:
+    app: img-proc-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app: img-proc-mcp
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8090
+      targetPort: http

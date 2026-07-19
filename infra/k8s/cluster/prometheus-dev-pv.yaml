@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prometheus-dev-pv
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ebs-sc
+  persistentVolumeReclaimPolicy: Retain
+  claimRef:
+    namespace: dev
+    name: prometheus-pvc
+  csi:
+    driver: ebs.csi.aws.com
+    volumeHandle: vol-0440b256480164cd0
+    fsType: ext4
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values:
+                - us-east-1b
