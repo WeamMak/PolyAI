@@ -58,7 +58,7 @@ jobs:
               services/img-proc-mcp/*)
                 img_proc_mcp=true
                 ;;
-              docker-compose.yml|docker-compose.yaml|prometheus.yml|.github/workflows/deploy.yaml)
+              docker-compose.yml|docker-compose.yaml|prometheus.yml|fluent-bit.conf|infra/grafana/*|.github/workflows/deploy.yaml)
                 stack=true
                 ;;
             esac
@@ -161,7 +161,9 @@ jobs:
           host: dev.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
-          script: mkdir -p ${{ env.STACK_DIR }}
+          script: |
+            mkdir -p ${{ env.STACK_DIR }}
+            rm -f ${{ env.STACK_DIR }}/infra/grafana/provisioning/datasources/prometheus.yml
 
       - name: Copy compose files
         uses: appleboy/scp-action@v0.1.7
@@ -169,7 +171,7 @@ jobs:
           host: dev.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
-          source: "docker-compose.yml,prometheus.yml"
+          source: "docker-compose.yml,prometheus.yml,fluent-bit.conf,infra/grafana"
           target: ${{ env.STACK_DIR }}
 
       - name: Deploy stack
@@ -179,6 +181,7 @@ jobs:
           username: ubuntu
           key: ${{ secrets.DEV_INSTANCE_SSH_KEY }}
           script: |
+            set -e
             cd ${{ env.STACK_DIR }}
             touch .env
 
@@ -208,7 +211,12 @@ jobs:
               set_env IMG_PROC_MCP_IMAGE_TAG "${{ env.IMAGE_TAG }}"
             fi
 
+            set_env FLUENT_BIT_S3_BUCKET "weam-polyai-logs-dev"
+            set_env AWS_REGION "us-east-1"
+
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            docker image prune -af
+            docker builder prune -af
             docker compose pull
             docker compose up -d --no-build
             docker image prune -af
@@ -231,7 +239,9 @@ jobs:
           host: prod.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
-          script: mkdir -p ${{ env.STACK_DIR }}
+          script: |
+            mkdir -p ${{ env.STACK_DIR }}
+            rm -f ${{ env.STACK_DIR }}/infra/grafana/provisioning/datasources/prometheus.yml
 
       - name: Copy compose files
         uses: appleboy/scp-action@v0.1.7
@@ -239,7 +249,7 @@ jobs:
           host: prod.weam.fursa.click
           username: ubuntu
           key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
-          source: "docker-compose.yml,prometheus.yml"
+          source: "docker-compose.yml,prometheus.yml,fluent-bit.conf,infra/grafana"
           target: ${{ env.STACK_DIR }}
 
       - name: Deploy stack
@@ -249,6 +259,7 @@ jobs:
           username: ubuntu
           key: ${{ secrets.PROD_INSTANCE_SSH_KEY }}
           script: |
+            set -e
             cd ${{ env.STACK_DIR }}
             touch .env
 
@@ -278,8 +289,14 @@ jobs:
               set_env IMG_PROC_MCP_IMAGE_TAG "${{ env.IMAGE_TAG }}"
             fi
 
+            set_env FLUENT_BIT_S3_BUCKET "weam-polyai-logs-prod"
+            set_env AWS_REGION "us-east-1"
+
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            docker image prune -af
+            docker builder prune -af
             docker compose pull
             docker compose up -d --no-build
-            docker image prune -f
+            docker image prune -af
+            docker builder prune -af
             docker compose ps

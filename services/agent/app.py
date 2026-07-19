@@ -6,9 +6,15 @@ from contextlib import asynccontextmanager
 from threading import Lock
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Histogram,
+    generate_latest,
+)
 from pydantic import BaseModel, Field
 
 import agent_loop
@@ -30,6 +36,28 @@ run_agent = agent_loop.run_agent
 
 _chat_rate_limit_lock = Lock()
 _next_chat_request_at = 0.0
+
+CHAT_REQUESTS_TOTAL = Counter(
+    "agent_chat_requests_total",
+    "Completed chat requests.",
+    ["status"],
+)
+CHAT_REQUESTS_TOTAL.labels(status="success")
+CHAT_REQUESTS_TOTAL.labels(status="error")
+
+CHAT_REQUEST_DURATION_SECONDS = Histogram(
+    "agent_chat_request_duration_seconds",
+    "Time spent processing chat requests.",
+    buckets=(0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300),
+)
+INPUT_TOKENS_TOTAL = Counter(
+    "agent_input_tokens_total",
+    "Input tokens used by completed agent runs.",
+)
+OUTPUT_TOKENS_TOTAL = Counter(
+    "agent_output_tokens_total",
+    "Output tokens used by completed agent runs.",
+)
 
 
 def check_chat_rate_limit() -> None:
@@ -82,6 +110,25 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def record_chat_metrics(request: Request, call_next):
+    if request.url.path != "/chat":
+        return await call_next(request)
+
+    start_time = time.perf_counter()
+    status = "error"
+
+    try:
+        response = await call_next(request)
+        if response.status_code < 400:
+            status = "success"
+        return response
+    finally:
+        CHAT_REQUESTS_TOTAL.labels(status=status).inc()
+        request_duration = time.perf_counter() - start_time
+        CHAT_REQUEST_DURATION_SECONDS.observe(request_duration)
 
 
 class ChatMessage(BaseModel):
@@ -157,6 +204,8 @@ async def chat(request: ChatRequest):
     try:
         start_time = time.time()
         agent_result = await run_agent(lc_messages)
+        INPUT_TOKENS_TOTAL.inc(agent_result.tokens_used.input)
+        OUTPUT_TOKENS_TOTAL.inc(agent_result.tokens_used.output)
         agent_loop_time_s = round(time.time() - start_time, 2)
         final_active_image_s3_key = _current_image_s3_key.get()
 
@@ -191,6 +240,14 @@ def ready():
         raise HTTPException(status_code=503, detail="Service is not ready")
 
     return {"status": "ready"}
+
+
+@app.get("/metrics")
+def metrics():
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 
 
 if __name__ == "__main__":

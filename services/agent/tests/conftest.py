@@ -92,6 +92,16 @@ def agent_module(monkeypatch):
     try:
         yield module
     finally:
+        from prometheus_client import REGISTRY
+
+        for collector in [
+            module.CHAT_REQUESTS_TOTAL,
+            module.CHAT_REQUEST_DURATION_SECONDS,
+            module.INPUT_TOKENS_TOTAL,
+            module.OUTPUT_TOKENS_TOTAL,
+        ]:
+            REGISTRY.unregister(collector)
+
         for module_name in AGENT_MODULE_NAMES:
             sys.modules.pop(module_name, None)
 
