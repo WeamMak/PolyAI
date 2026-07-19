@@ -12,8 +12,8 @@ spec:
     metadata:
       labels:
         app: yolo
-    annotations:
-      gitops-test: "test-1" 
+      annotations:
+        gitops-test: "test-1" 
     spec:
       containers:
         - name: yolo
