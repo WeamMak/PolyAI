@@ -1,13 +1,3 @@
-variable "ami_id" {
-  description = "EC2 Ubuntu AMI"
-  type        = string
-}
-
-variable "availability_zone" {
-  description = "Availability zone for the EC2 instance"
-  type        = string
-}
-
 variable "env" {
   description = "Deployment environment"
   type        = string
@@ -31,11 +21,6 @@ variable "region" {
 variable "s3_bucket_prefix" {
   description = "Prefix for the application S3 bucket name"
   type        = string
-}
-
-variable "availability_zones" {
-  description = "Availability zones used by the VPC"
-  type        = list(string)
 }
 
 variable "private_subnet_cidrs" {

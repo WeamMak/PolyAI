@@ -22,6 +22,20 @@ provider "aws" {
   profile = "default"
 }
 
+data "aws_ami" "ubuntu_ami" {
+  most_recent = true
+  owners      = ["099720109477"]
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+  }
+}
+
+data "aws_availability_zones" "available_azs" {
+  state = "available"
+}
+
 module "polyai_service_vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.8.1"
@@ -29,7 +43,7 @@ module "polyai_service_vpc" {
   name = "makhoul-polyai-${var.env}-vpc"
   cidr = var.vpc_cidr
 
-  azs             = var.availability_zones
+  azs             = data.aws_availability_zones.available_azs.names
   private_subnets = var.private_subnet_cidrs
   public_subnets  = var.public_subnet_cidrs
 
@@ -95,7 +109,7 @@ resource "aws_s3_bucket" "polyai_dev" {
 }
 
 resource "aws_instance" "polyai_dev" {
-  ami                         = var.ami_id
+  ami                         = data.aws_ami.ubuntu_ami.id
   instance_type               = var.instance_type
   subnet_id                   = module.polyai_service_vpc.public_subnets[0]
   associate_public_ip_address = true
@@ -131,4 +145,3 @@ resource "aws_volume_attachment" "polyai_dev_data" {
   volume_id   = aws_ebs_volume.polyai_dev_data.id
   instance_id = aws_instance.polyai_dev.id
 }
-
