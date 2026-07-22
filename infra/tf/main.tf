@@ -1,21 +1,29 @@
 terraform {
+  required_version = ">= 1.7.0"
+
+  backend "s3" {
+    bucket       = "weam-polyai-tfstate-us-east-1"
+    key          = "polyai/dev/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = ">= 5.55"
     }
   }
-
-  required_version = ">= 1.7.0"
 }
 
 provider "aws" {
-  region  = "us-east-1"
+  region  = var.region
   profile = "default"
 }
 
 resource "aws_security_group" "polyai_dev_sg" {
-  name        = "makhoul-polyai-dev-sg"
+  name        = "makhoul-polyai-${var.env}-sg"
   description = "Allow SSH and HTTP traffic"
 
   ingress {
@@ -43,33 +51,34 @@ resource "aws_security_group" "polyai_dev_sg" {
   }
 
   tags = {
-    Name = "makhoul-polyai-dev-sg"
-    Env  = "dev"
+    Name = "makhoul-polyai-${var.env}-sg"
+    Env  = var.env
   }
 }
 
 resource "aws_key_pair" "polyai_dev" {
-  key_name   = "makhoul-polyai-dev-key"
+  key_name   = var.key_pair_name
   public_key = file(pathexpand("~/.ssh/polyai_dev.pub"))
 
   tags = {
-    Name = "makhoul-polyai-dev-key"
-    Env  = "dev"
+    Name = var.key_pair_name
+    Env  = var.env
   }
 }
 
 resource "aws_s3_bucket" "polyai_dev" {
-  bucket_prefix = "makhoul-polyai-dev-"
+  bucket_prefix = var.s3_bucket_prefix
 
   tags = {
-    Name = "makhoul-polyai-dev"
-    Env  = "dev"
+    Name = "makhoul-polyai-${var.env}"
+    Env  = var.env
   }
 }
 
 resource "aws_instance" "polyai_dev" {
-  ami           = "ami-0b6d9d3d33ba97d99"
-  instance_type = "t2.nano"
+  ami               = var.ami_id
+  availability_zone = var.availability_zone
+  instance_type     = var.instance_type
 
   key_name               = aws_key_pair.polyai_dev.key_name
   vpc_security_group_ids = [aws_security_group.polyai_dev_sg.id]
@@ -78,8 +87,8 @@ resource "aws_instance" "polyai_dev" {
   depends_on = [aws_s3_bucket.polyai_dev]
 
   tags = {
-    Name      = "makhoul-polyai-dev"
-    Env       = "dev"
+    Name      = "makhoul-polyai-${var.env}"
+    Env       = var.env
     CreatedBy = "makhoul"
     Author    = "Makhoul"
   }
@@ -92,8 +101,8 @@ resource "aws_ebs_volume" "polyai_dev_data" {
   encrypted         = true
 
   tags = {
-    Name = "makhoul-polyai-dev-data"
-    Env  = "dev"
+    Name = "makhoul-polyai-${var.env}-data"
+    Env  = var.env
   }
 }
 

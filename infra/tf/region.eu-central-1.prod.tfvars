@@ -1,0 +1,7 @@
+ami_id            = "ami-0303e2e4a29f041a3"
+availability_zone = "eu-central-1a"
+env               = "prod"
+instance_type     = "t2.nano"
+key_pair_name     = "makhoul-polyai-prod-key"
+region            = "eu-central-1"
+s3_bucket_prefix  = "makhoul-polyai-prod-"
