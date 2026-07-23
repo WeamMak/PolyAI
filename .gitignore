@@ -54,3 +54,11 @@ services/yolo/coverage.xml
 !.agents/skills/*/reports/.gitkeep
 docker-compose.override.yml
 docker-compose.override.yaml
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
