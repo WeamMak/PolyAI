@@ -11,7 +11,7 @@ resources:
 # Update these tags to the tested main commit before building and deploying prod.
 images:
   - name: docker.io/weammakhoul/yolo-service
-    newTag: k8s-dev-2878d4344160915673a3bfe9fc2aa5303d787d35
+    newTag: k8s-prod-bc2ea062cb88b7b05afd41545c12df51bfef956f
   - name: docker.io/weammakhoul/agent-service
     newTag: k8s-dev-2878d4344160915673a3bfe9fc2aa5303d787d35
   - name: docker.io/weammakhoul/frontend-service
