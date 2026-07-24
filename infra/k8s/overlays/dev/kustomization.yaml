@@ -7,6 +7,7 @@ resources:
   - ../../base
   - namespace.yaml
   - prometheus-pvc.yaml
+  - grafana-pvc.yaml
 
 # Build and push these images before applying this overlay.
 images:
