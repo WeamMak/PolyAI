@@ -1,17 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: polyai-prod
+  name: polyai-cluster
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/WeamMak/PolyAI.git
     targetRevision: refs/heads/main
-    path: infra/k8s/overlays/prod
+    path: infra/k8s/cluster
   destination:
     server: https://kubernetes.default.svc
-    namespace: prod
+    namespace: default
   syncPolicy:
-    syncOptions:
-      - CreateNamespace=true
+    automated:
+      enabled: true
+      prune: false
+      selfHeal: true

@@ -1,10 +1,12 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: prometheus-prod-pv
+  name: grafana-prod-pv
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   capacity:
-    storage: 5Gi
+    storage: 2Gi
   volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
@@ -12,10 +14,10 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   claimRef:
     namespace: prod
-    name: prometheus-pvc
+    name: grafana-pvc
   csi:
     driver: ebs.csi.aws.com
-    volumeHandle: vol-03efedd34d2f64888
+    volumeHandle: vol-04757c81c1e1a6ec7
     fsType: ext4
   nodeAffinity:
     required:
