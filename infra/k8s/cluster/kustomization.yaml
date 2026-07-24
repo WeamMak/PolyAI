@@ -3,7 +3,3 @@ kind: Kustomization
 
 resources:
   - ebs-storage-class.yaml
-  - prometheus-dev-pv.yaml
-  - prometheus-prod-pv.yaml
-  - grafana-dev-pv.yaml
-  - grafana-prod-pv.yaml

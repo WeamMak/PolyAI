@@ -6,7 +6,9 @@ namespace: dev
 resources:
   - ../../base
   - namespace.yaml
+  - prometheus-dev-pv.yaml
   - prometheus-pvc.yaml
+  - grafana-dev-pv.yaml
   - grafana-pvc.yaml
 
 # Build and push these images before applying this overlay.

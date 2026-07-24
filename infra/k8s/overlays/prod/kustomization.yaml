@@ -6,7 +6,9 @@ namespace: prod
 resources:
   - ../../base
   - namespace.yaml
+  - prometheus-prod-pv.yaml
   - prometheus-pvc.yaml
+  - grafana-prod-pv.yaml
   - grafana-pvc.yaml
 
 # Update these tags to the tested main commit before building and deploying prod.
